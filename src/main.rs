@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use rustls::server::ServerSessionMemoryCache;
-use rustls_pemfile::{certs, rsa_private_keys};
+use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::{
     collections::{HashMap, HashSet},
     fs::File as StdFile,
@@ -76,7 +76,8 @@ fn load_tls_config() -> ServerConfig {
         .map(Certificate)
         .collect();
 
-    let mut keys = rsa_private_keys(key_file).unwrap();
+    // Load the private key from the key file as PKCS8
+    let mut keys = pkcs8_private_keys(key_file).unwrap();
     let key = PrivateKey(keys.remove(0));
 
     let mut config = ServerConfig::builder()
