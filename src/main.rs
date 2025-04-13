@@ -85,6 +85,8 @@ fn load_tls_config() -> ServerConfig {
         .with_single_cert(cert_chain, key)
         .unwrap();
 
+    // Allow multiple sessions per client, making it possible to
+    // re-use the same TLS connection for multiple SMTP sessions
     config.session_storage = ServerSessionMemoryCache::new(256);
     config
 }
