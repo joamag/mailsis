@@ -66,6 +66,11 @@ async fn main() -> std::io::Result<()> {
     }
 }
 
+/// Loads the TLS configuration from the files and returns a ServerConfig.
+///
+/// The files should be structured as follows:
+/// cert.pem: The certificate file.
+/// key.pem: The private key file.
 fn load_tls_config() -> ServerConfig {
     let cert_file = &mut StdBufReader::new(StdFile::open("cert.pem").unwrap());
     let key_file = &mut StdBufReader::new(StdFile::open("key.pem").unwrap());
@@ -92,6 +97,13 @@ fn load_tls_config() -> ServerConfig {
     config
 }
 
+/// Loads the credentials from the file and returns a HashMap of usernames and passwords.
+///
+/// The file should be formatted as follows:
+/// username:password
+/// username2:password2
+/// username3:password3
+/// ...
 fn load_credentials(path: &str) -> HashMap<String, String> {
     let mut creds = HashMap::new();
     if let Ok(content) = std::fs::read_to_string(path) {
@@ -103,6 +115,7 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
     }
     creds
 }
+
 
 async fn handle_smtp_session(
     stream: TcpStream,
