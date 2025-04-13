@@ -53,7 +53,7 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    println!("SMTP server with STARTTLS + AUTH LOGIN on port 2525");
+    println!("Mailsis SMTP running on port 2525");
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -124,13 +124,26 @@ async fn handle_smtp_session(
         }
 
         let cmd = line.trim_end();
+        let mut parts = cmd.split_whitespace();
+        let command = parts.next().unwrap_or("").to_uppercase();
+        let arg = parts.next();
+
         println!("> {}", cmd);
 
-        match cmd.to_uppercase().as_str() {
+        match command.as_str() {
             "EHLO" | "HELO" => {
                 writer.write_all(b"250-localhost greets you\r\n").await.ok();
                 writer.write_all(b"250-STARTTLS\r\n").await.ok();
                 writer.write_all(b"250 AUTH LOGIN\r\n").await.ok();
+            }
+            "MAIL" => {
+                writer.write_all(b"250 OK\r\n").await.ok();
+            }
+            "RCPT" => {
+                writer.write_all(b"250 OK\r\n").await.ok();
+            }
+            "DATA" => {
+                writer.write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n").await.ok();
             }
             "STARTTLS" => {
                 writer.write_all(b"220 Ready to start TLS\r\n").await.ok();
@@ -152,6 +165,7 @@ async fn handle_smtp_session(
                 }
             }
             _ => {
+                println!("Unknown command: {}", command);
                 writer
                     .write_all(b"502 Command not implemented\r\n")
                     .await
@@ -325,6 +339,7 @@ async fn handle_tls_session(
                     rcpt_to.insert(value.trim().to_string());
                     writer.write_all(b"250 OK\r\n").await.ok();
                 } else {
+                    println!("Unknown command: {}", command);
                     writer
                         .write_all(b"502 Command not implemented\r\n")
                         .await
