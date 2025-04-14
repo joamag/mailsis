@@ -23,15 +23,9 @@ use tokio_rustls::{
 };
 use uuid::Uuid;
 
-struct Mailbox {
-    path: String,
-    files: Vec<String>,
-}
-
 struct SMTPSession {
     from: String,
     rcpts: HashSet<String>,
-    body: String,
     authenticated: bool,
     auth_required: bool,
     credentials: Arc<HashMap<String, String>>,
@@ -42,7 +36,6 @@ impl Default for SMTPSession {
         Self {
             from: String::new(),
             rcpts: HashSet::new(),
-            body: String::new(),
             authenticated: false,
             auth_required: false,
             credentials: Arc::new(HashMap::new()),
@@ -168,73 +161,16 @@ impl SMTPSession {
     ) {
         match command.as_str() {
             "EHLO" | "HELO" => {
-                writer.write_all(b"250-localhost greets you\r\n").await.ok();
-                writer.write_all(b"250-STARTTLS\r\n").await.ok();
-                writer.write_all(b"250 AUTH LOGIN\r\n").await.ok();
+                self.handle_ehlo_helo(writer).await;
             }
             "AUTH" if arg == Some("LOGIN") => {
-                writer.write_all(b"334 VXNlcm5hbWU6\r\n").await.ok();
-
-                line.clear();
-                reader.read_line(line).await.ok();
-                let username = general_purpose::STANDARD
-                    .decode(line.trim())
-                    .unwrap_or_default();
-                let username = String::from_utf8_lossy(&username);
-
-                writer.write_all(b"334 UGFzc3dvcmQ6\r\n").await.ok();
-
-                line.clear();
-                reader.read_line(line).await.ok();
-                let password = general_purpose::STANDARD
-                    .decode(line.trim())
-                    .unwrap_or_default();
-                let password = String::from_utf8_lossy(&password);
-
-                if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
-                    writer
-                        .write_all(b"235 Authentication successful\r\n")
-                        .await
-                        .ok();
-                    self.authenticated = true;
-                } else {
-                    writer
-                        .write_all(b"535 Authentication failed\r\n")
-                        .await
-                        .ok();
-                }
+                self.handle_auth_login(reader, writer, line).await;
             }
             "AUTH" => {
                 if let Some(arg) = arg {
                     if let Some(encoded_user) = arg.strip_prefix("LOGIN") {
-                        let username = general_purpose::STANDARD
-                            .decode(encoded_user.trim())
-                            .unwrap_or_default();
-                        let username = String::from_utf8_lossy(&username);
-
-                        writer.write_all(b"334 UGFzc3dvcmQ6\r\n").await.ok();
-
-                        line.clear();
-                        reader.read_line(line).await.ok();
-                        let password = general_purpose::STANDARD
-                            .decode(line.trim())
-                            .unwrap_or_default();
-                        let password = String::from_utf8_lossy(&password);
-
-                        if self.credentials.get(username.trim())
-                            == Some(&password.trim().to_string())
-                        {
-                            writer
-                                .write_all(b"235 Authentication successful\r\n")
-                                .await
-                                .ok();
-                            self.authenticated = true;
-                        } else {
-                            writer
-                                .write_all(b"535 Authentication failed\r\n")
-                                .await
-                                .ok();
-                        }
+                        self.handle_auth_with_username(reader, writer, line, encoded_user)
+                            .await;
                     } else {
                         writer
                             .write_all(b"504 Unrecognized authentication type\r\n")
@@ -250,92 +186,199 @@ impl SMTPSession {
             }
             "MAIL" => {
                 if let Some(value) = arg {
-                    if !self.authenticated && self.auth_required {
-                        writer
-                            .write_all(b"530 Authentication required\r\n")
-                            .await
-                            .ok();
-                        return;
-                    }
-                    if let Some(value) = value.strip_prefix("FROM:") {
-                        println!("MAIL FROM: {}", value);
-                        self.from = value.trim().to_string();
-                        writer.write_all(b"250 OK\r\n").await.ok();
-                    } else {
-                        writer
-                            .write_all(b"501 Syntax error in parameters or arguments\r\n")
-                            .await
-                            .ok();
-                    }
+                    self.handle_mail(writer, value).await;
                 }
             }
             "RCPT" => {
                 if let Some(value) = arg {
-                    if !self.authenticated && self.auth_required {
-                        writer
-                            .write_all(b"530 Authentication required\r\n")
-                            .await
-                            .ok();
-                        return;
-                    }
-                    if let Some(value) = value.strip_prefix("TO:") {
-                        println!("RCPT TO: {}", value);
-                        self.rcpts.insert(value.trim().to_string());
-                        writer.write_all(b"250 OK\r\n").await.ok();
-                    } else {
-                        writer
-                            .write_all(b"501 Syntax error in parameters or arguments\r\n")
-                            .await
-                            .ok();
-                    }
+                    self.handle_rcpt(writer, value).await;
                 }
             }
             "DATA" => {
-                if !self.authenticated && self.auth_required {
-                    writer
-                        .write_all(b"530 Authentication required\r\n")
-                        .await
-                        .ok();
-                    return;
-                }
-                if self.rcpts.is_empty() {
-                    writer.write_all(b"554 No valid recipients\r\n").await.ok();
-                    return;
-                }
-
-                writer
-                    .write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n")
-                    .await
-                    .ok();
-
-                let mut data = String::new();
-                loop {
-                    line.clear();
-                    reader.read_line(line).await.ok();
-                    if line == ".\r\n" {
-                        break;
-                    }
-                    data.push_str(&line);
-                }
-
-                let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
-                writer.write_all(b"250 Message accepted\r\n").await.ok();
-
-                self.from.clear();
-                self.rcpts.clear();
+                self.handle_data(reader, writer, tx, line).await;
             }
             "QUIT" => {
-                writer.write_all(b"221 Bye\r\n").await.ok();
-                return;
+                Self::handle_quit(writer).await;
             }
             _ => {
                 println!("Unknown command: {}", command);
-                writer
-                    .write_all(b"502 Command not implemented\r\n")
-                    .await
-                    .ok();
+                Self::handle_unknown(writer).await;
             }
         }
+    }
+
+    async fn handle_ehlo_helo<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
+        writer.write_all(b"250-localhost greets you\r\n").await.ok();
+        writer.write_all(b"250-STARTTLS\r\n").await.ok();
+        writer.write_all(b"250 AUTH LOGIN\r\n").await.ok();
+    }
+
+    async fn handle_auth_login<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+        &mut self,
+        reader: &mut R,
+        writer: &mut W,
+        line: &mut String,
+    ) {
+        writer.write_all(b"334 VXNlcm5hbWU6\r\n").await.ok();
+
+        line.clear();
+        reader.read_line(line).await.ok();
+        let username = general_purpose::STANDARD
+            .decode(line.trim())
+            .unwrap_or_default();
+        let username = String::from_utf8_lossy(&username);
+
+        writer.write_all(b"334 UGFzc3dvcmQ6\r\n").await.ok();
+
+        line.clear();
+        reader.read_line(line).await.ok();
+        let password = general_purpose::STANDARD
+            .decode(line.trim())
+            .unwrap_or_default();
+        let password = String::from_utf8_lossy(&password);
+
+        if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
+            writer
+                .write_all(b"235 Authentication successful\r\n")
+                .await
+                .ok();
+            self.authenticated = true;
+        } else {
+            writer
+                .write_all(b"535 Authentication failed\r\n")
+                .await
+                .ok();
+        }
+    }
+
+    async fn handle_auth_with_username<
+        R: AsyncRead + AsyncBufRead + Unpin,
+        W: AsyncWrite + Unpin,
+    >(
+        &mut self,
+        reader: &mut R,
+        writer: &mut W,
+        line: &mut String,
+        encoded_user: &str,
+    ) {
+        let username = general_purpose::STANDARD
+            .decode(encoded_user.trim())
+            .unwrap_or_default();
+        let username = String::from_utf8_lossy(&username);
+
+        writer.write_all(b"334 UGFzc3dvcmQ6\r\n").await.ok();
+
+        line.clear();
+        reader.read_line(line).await.ok();
+        let password = general_purpose::STANDARD
+            .decode(line.trim())
+            .unwrap_or_default();
+        let password = String::from_utf8_lossy(&password);
+
+        if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
+            writer
+                .write_all(b"235 Authentication successful\r\n")
+                .await
+                .ok();
+            self.authenticated = true;
+        } else {
+            writer
+                .write_all(b"535 Authentication failed\r\n")
+                .await
+                .ok();
+        }
+    }
+
+    async fn handle_mail<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
+        if !self.authenticated && self.auth_required {
+            writer
+                .write_all(b"530 Authentication required\r\n")
+                .await
+                .ok();
+            return;
+        }
+        if let Some(value) = value.strip_prefix("FROM:") {
+            println!("MAIL FROM: {}", value);
+            self.from = value.trim().to_string();
+            writer.write_all(b"250 OK\r\n").await.ok();
+        } else {
+            writer
+                .write_all(b"501 Syntax error in parameters or arguments\r\n")
+                .await
+                .ok();
+        }
+    }
+
+    async fn handle_rcpt<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
+        if !self.authenticated && self.auth_required {
+            writer
+                .write_all(b"530 Authentication required\r\n")
+                .await
+                .ok();
+            return;
+        }
+        if let Some(value) = value.strip_prefix("TO:") {
+            println!("RCPT TO: {}", value);
+            self.rcpts.insert(value.trim().to_string());
+            writer.write_all(b"250 OK\r\n").await.ok();
+        } else {
+            writer
+                .write_all(b"501 Syntax error in parameters or arguments\r\n")
+                .await
+                .ok();
+        }
+    }
+
+    async fn handle_data<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+        &mut self,
+        reader: &mut R,
+        writer: &mut W,
+        tx: &mpsc::Sender<(String, HashSet<String>, String)>,
+        line: &mut String,
+    ) {
+        if !self.authenticated && self.auth_required {
+            writer
+                .write_all(b"530 Authentication required\r\n")
+                .await
+                .ok();
+            return;
+        }
+        if self.rcpts.is_empty() {
+            writer.write_all(b"554 No valid recipients\r\n").await.ok();
+            return;
+        }
+
+        writer
+            .write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n")
+            .await
+            .ok();
+
+        let mut data = String::new();
+        loop {
+            line.clear();
+            reader.read_line(line).await.ok();
+            if line == ".\r\n" {
+                break;
+            }
+            data.push_str(line);
+        }
+
+        let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
+        writer.write_all(b"250 Message accepted\r\n").await.ok();
+
+        self.from.clear();
+        self.rcpts.clear();
+    }
+
+    async fn handle_quit<W: AsyncWrite + Unpin>(writer: &mut W) {
+        writer.write_all(b"221 Bye\r\n").await.ok();
+    }
+
+    async fn handle_unknown<W: AsyncWrite + Unpin>(writer: &mut W) {
+        writer
+            .write_all(b"502 Command not implemented\r\n")
+            .await
+            .ok();
     }
 }
 
