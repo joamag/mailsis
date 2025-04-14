@@ -198,11 +198,11 @@ impl SMTPSession {
                 self.handle_data(reader, writer, tx, line).await;
             }
             "QUIT" => {
-                Self::handle_quit(writer).await;
+                self.handle_quit(writer).await;
             }
             _ => {
                 println!("Unknown command: {}", command);
-                Self::handle_unknown(writer).await;
+                self.handle_unknown(writer).await;
             }
         }
     }
@@ -370,13 +370,17 @@ impl SMTPSession {
         self.rcpts.clear();
     }
 
-    async fn handle_quit<W: AsyncWrite + Unpin>(writer: &mut W) {
-        writer.write_all(b"221 Bye\r\n").await.ok();
+    async fn handle_quit<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
+        self.write(writer, 221, "Bye").await;
     }
 
-    async fn handle_unknown<W: AsyncWrite + Unpin>(writer: &mut W) {
+    async fn handle_unknown<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
+        self.write(writer, 502, "Command not implemented").await;
+    }
+
+    async fn write<W: AsyncWrite + Unpin>(&self, writer: &mut W, code: u16, message: &str) {
         writer
-            .write_all(b"502 Command not implemented\r\n")
+            .write_all(format!("{} {}\r\n", code, message).as_bytes())
             .await
             .ok();
     }
