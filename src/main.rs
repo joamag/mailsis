@@ -20,6 +20,29 @@ use tokio_rustls::{
 };
 use uuid::Uuid;
 
+struct Mailbox {
+    path: String,
+    files: Vec<String>,
+}
+
+struct SMTPSession {
+    from: String,
+    rcpts: HashSet<String>,
+    body: String,
+    authenticated: bool,
+}
+
+impl Default for SMTPSession {
+    fn default() -> Self {
+        Self {
+            from: String::new(),
+            rcpts: HashSet::new(),
+            body: String::new(),
+            authenticated: false,
+        }
+    }
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:2525").await?;
@@ -116,13 +139,15 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
     creds
 }
 
-
 async fn handle_smtp_session(
     stream: TcpStream,
     tls_acceptor: TlsAcceptor,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     credentials: Arc<HashMap<String, String>>,
 ) {
+    // Create a new SMTP session with default values
+    let mut session: SMTPSession = SMTPSession::default();
+
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
@@ -156,7 +181,10 @@ async fn handle_smtp_session(
                 writer.write_all(b"250 OK\r\n").await.ok();
             }
             "DATA" => {
-                writer.write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n").await.ok();
+                writer
+                    .write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n")
+                    .await
+                    .ok();
             }
             "STARTTLS" => {
                 writer.write_all(b"220 Ready to start TLS\r\n").await.ok();
