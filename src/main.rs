@@ -54,15 +54,24 @@ async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box
     fs::create_dir_all(&path).await?;
     let filename = format!("{}/{}.eml", path, Uuid::new_v4());
     let mut file = File::create(&filename).await?;
-    file.write_all(format!("From: {}\r\n", from).as_bytes())
-        .await?;
-    file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
-        .await?;
-    file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
-        .await?;
+    if !is_mime_valid(&body).await {
+        file.write_all(format!("From: {}\r\n", from).as_bytes())
+            .await?;
+        file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
+            .await?;
+        file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
+            .await?;
+    }
     file.write_all(body.as_bytes()).await?;
     println!("Stored: {}", filename);
     Ok(())
+}
+
+async fn is_mime_valid(body: &str) -> bool {
+    let mut lines = body.lines();
+    let first_line = lines.next().unwrap_or("");
+    let mime_type = first_line.split_whitespace().next().unwrap_or("");
+    mime_type == "MIME-Version:"
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
