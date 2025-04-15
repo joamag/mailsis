@@ -4,7 +4,7 @@ Simple (yet efficient) [SMTP](https://datatracker.ietf.org/doc/html/rfc5321) and
 
 ## Description
 
-Built on top of the powerful [Rust](https://www.rust-lang.org/) programming language, Mailsis provides a safe and efficient implementation of the classic SMTP and IMAP protocols.
+Built on top of the powerful [Rust Programming Language](https://www.rust-lang.org/), Mailsis provides a safe and efficient implementation of the classic SMTP and IMAP protocols.
 
 ### Features
 
