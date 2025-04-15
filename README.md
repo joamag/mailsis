@@ -2,8 +2,8 @@
 
 Simple (yet efficient) SMTP and IMAP server.
 
-Built on top of Rust Mailsis provides a safe and efficient implementation of the classic SMTP and IMAP protocols.
+Built on top of [Rust](https://www.rust-lang.org/) Mailsis provides a safe and efficient implementation of the classic SMTP and IMAP protocols.
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+Appier is currently licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/).
