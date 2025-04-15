@@ -67,6 +67,9 @@ async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box
     Ok(())
 }
 
+/// Checks if the email is a valid MIME email.
+///
+/// A valid MIME email starts with a line that contains "MIME-Version:".
 async fn is_mime_valid(body: &str) -> bool {
     let mut lines = body.lines();
     let first_line = lines.next().unwrap_or("");
