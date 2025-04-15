@@ -4,6 +4,7 @@ use rustls::server::ServerSessionMemoryCache;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::{
     collections::{HashMap, HashSet},
+    error::Error,
     fs::File as StdFile,
     io::BufReader as StdBufReader,
     sync::Arc,
@@ -43,34 +44,42 @@ impl Default for SMTPSession {
     }
 }
 
+/// Stores the email in the mailbox directory, creates the directory if it doesn't exist.
+/// Each user has their own directory, and each email is stored in a file named with a UUID.
+///
+/// There's no limit to the number of emails that can be stored.
+async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box<dyn Error>> {
+    let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+    let path = format!("mailbox/{}", safe_rcpt);
+    fs::create_dir_all(&path).await?;
+    let filename = format!("{}/{}.eml", path, Uuid::new_v4());
+    let mut file = File::create(&filename).await?;
+    file.write_all(format!("From: {}\r\n", from).as_bytes())
+        .await?;
+    file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
+        .await?;
+    file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
+        .await?;
+    file.write_all(body.as_bytes()).await?;
+    println!("Stored: {}", filename);
+    Ok(())
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:2525").await?;
-    let tls_config = Arc::new(load_tls_config());
+    let tls_config = Arc::new(load_tls_config().unwrap());
     let tls_acceptor = TlsAcceptor::from(tls_config);
     let credentials = Arc::new(load_credentials("users.txt"));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
 
+    // Spawn a task to handle the email storage, this is a long running
+    // task that will run until the program is terminated
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in rcpts {
-                let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-                let path = format!("mailbox/{}", safe_rcpt);
-                if fs::create_dir_all(&path).await.is_ok() {
-                    let filename = format!("{}/{}.eml", path, Uuid::new_v4());
-                    if let Ok(mut file) = File::create(&filename).await {
-                        let _ = file
-                            .write_all(format!("From: {}\r\n", from).as_bytes())
-                            .await;
-                        let _ = file.write_all(format!("To: {}\r\n", rcpt).as_bytes()).await;
-                        let _ = file
-                            .write_all(
-                                format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes(),
-                            )
-                            .await;
-                        let _ = file.write_all(body.as_bytes()).await;
-                        println!("Stored: {}", filename);
-                    }
+                if let Err(error) = store_email(from.clone(), rcpt, body.clone()).await {
+                    println!("Error storing email: {}", error);
                 }
             }
         }
@@ -94,9 +103,9 @@ async fn main() -> std::io::Result<()> {
 /// The files should be structured as follows:
 /// cert.pem: The certificate file.
 /// key.pem: The private key file.
-fn load_tls_config() -> ServerConfig {
-    let cert_file = &mut StdBufReader::new(StdFile::open("cert.pem").unwrap());
-    let key_file = &mut StdBufReader::new(StdFile::open("key.pem").unwrap());
+fn load_tls_config() -> Result<ServerConfig, Box<dyn Error>> {
+    let cert_file = &mut StdBufReader::new(StdFile::open("cert.pem")?);
+    let key_file = &mut StdBufReader::new(StdFile::open("key.pem")?);
 
     let cert_chain = certs(cert_file)
         .unwrap()
@@ -105,19 +114,18 @@ fn load_tls_config() -> ServerConfig {
         .collect();
 
     // Load the private key from the key file as PKCS8
-    let mut keys = pkcs8_private_keys(key_file).unwrap();
+    let mut keys = pkcs8_private_keys(key_file)?;
     let key = PrivateKey(keys.remove(0));
 
     let mut config = ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(cert_chain, key)
-        .unwrap();
+        .with_single_cert(cert_chain, key)?;
 
     // Allow multiple sessions per client, making it possible to
     // re-use the same TLS connection for multiple SMTP sessions
     config.session_storage = ServerSessionMemoryCache::new(256);
-    config
+    Ok(config)
 }
 
 /// Loads the credentials from the file and returns a HashMap of usernames and passwords.
@@ -140,6 +148,7 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
 }
 
 impl SMTPSession {
+    /// Create a new SMTP session with default values.
     pub fn new(credentials: Arc<HashMap<String, String>>, auth_required: bool) -> Self {
         Self {
             credentials,
