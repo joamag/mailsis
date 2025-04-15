@@ -193,16 +193,12 @@ impl SMTPSession {
                         self.handle_auth_with_username(reader, writer, line, encoded_user)
                             .await;
                     } else {
-                        writer
-                            .write_all(b"504 Unrecognized authentication type\r\n")
-                            .await
-                            .ok();
+                        self.write(writer, 504, "Unrecognized authentication type")
+                            .await;
                     }
                 } else {
-                    writer
-                        .write_all(b"504 Unrecognized authentication type\r\n")
-                        .await
-                        .ok();
+                    self.write(writer, 504, "Unrecognized authentication type")
+                        .await;
                 }
             }
             "MAIL" => {
@@ -259,16 +255,10 @@ impl SMTPSession {
         let password = String::from_utf8_lossy(&password);
 
         if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
-            writer
-                .write_all(b"235 Authentication successful\r\n")
-                .await
-                .ok();
+            self.write(writer, 235, "Authentication successful").await;
             self.authenticated = true;
         } else {
-            writer
-                .write_all(b"535 Authentication failed\r\n")
-                .await
-                .ok();
+            self.write(writer, 535, "Authentication failed").await;
         }
     }
 
@@ -297,56 +287,39 @@ impl SMTPSession {
         let password = String::from_utf8_lossy(&password);
 
         if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
-            writer
-                .write_all(b"235 Authentication successful\r\n")
-                .await
-                .ok();
+            self.write(writer, 235, "Authentication successful").await;
             self.authenticated = true;
         } else {
-            writer
-                .write_all(b"535 Authentication failed\r\n")
-                .await
-                .ok();
+            self.write(writer, 535, "Authentication failed").await;
         }
     }
 
     async fn handle_mail<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
         if !self.authenticated && self.auth_required {
-            writer
-                .write_all(b"530 Authentication required\r\n")
-                .await
-                .ok();
-            return;
+            self.write(writer, 530, "Authentication required").await;
         }
         if let Some(value) = value.strip_prefix("FROM:") {
             println!("MAIL FROM: {}", value);
             self.from = value.trim().to_string();
-            writer.write_all(b"250 OK\r\n").await.ok();
+            self.write(writer, 250, "OK").await;
         } else {
-            writer
-                .write_all(b"501 Syntax error in parameters or arguments\r\n")
-                .await
-                .ok();
+            self.write(writer, 501, "Syntax error in parameters or arguments")
+                .await;
         }
     }
 
     async fn handle_rcpt<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
         if !self.authenticated && self.auth_required {
-            writer
-                .write_all(b"530 Authentication required\r\n")
-                .await
-                .ok();
+            self.write(writer, 530, "Authentication required").await;
             return;
         }
         if let Some(value) = value.strip_prefix("TO:") {
             println!("RCPT TO: {}", value);
             self.rcpts.insert(value.trim().to_string());
-            writer.write_all(b"250 OK\r\n").await.ok();
+            self.write(writer, 250, "OK").await;
         } else {
-            writer
-                .write_all(b"501 Syntax error in parameters or arguments\r\n")
-                .await
-                .ok();
+            self.write(writer, 501, "Syntax error in parameters or arguments")
+                .await;
         }
     }
 
@@ -358,21 +331,16 @@ impl SMTPSession {
         line: &mut String,
     ) {
         if !self.authenticated && self.auth_required {
-            writer
-                .write_all(b"530 Authentication required\r\n")
-                .await
-                .ok();
+            self.write(writer, 530, "Authentication required").await;
             return;
         }
         if self.rcpts.is_empty() {
-            writer.write_all(b"554 No valid recipients\r\n").await.ok();
+            self.write(writer, 554, "No valid recipients").await;
             return;
         }
 
-        writer
-            .write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n")
-            .await
-            .ok();
+        self.write(writer, 354, "End data with <CR><LF>.<CR><LF>")
+            .await;
 
         let mut data = String::new();
         loop {
@@ -385,7 +353,7 @@ impl SMTPSession {
         }
 
         let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
-        writer.write_all(b"250 Message accepted\r\n").await.ok();
+        self.write(writer, 250, "Message accepted").await;
 
         self.from.clear();
         self.rcpts.clear();
