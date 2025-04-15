@@ -16,4 +16,4 @@ Built on top of the powerful [Rust](https://www.rust-lang.org/) programming lang
 
 ## License
 
-Appier is currently licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/).
+Mailsis is currently licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/).
