@@ -7,7 +7,10 @@ use tokio::{
 };
 use uuid::Uuid;
 
-const FILE_SIZE: usize = 100 * 1024 * 1024;
+/// Size of the random file in bytes
+const RANDOM_FILE_SIZE: usize = 100 * 1024 * 1024;
+
+/// Size of the chunks to send in bytes
 const CHUNK_SIZE: usize = 16384;
 
 #[tokio::main]
@@ -69,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         (tokio::fs::read(&path).await?, filename)
     } else {
         println!("Generating random data...");
-        let file_data = generate_random_bytes(FILE_SIZE).await?;
+        let file_data = generate_random_bytes(RANDOM_FILE_SIZE).await?;
         (file_data, "random.bin".to_string())
     };
 
