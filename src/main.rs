@@ -12,8 +12,8 @@ use std::{
 use tokio::{
     fs::{self, File},
     io::{
-        split, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader,
-        ReadHalf, WriteHalf,
+        split, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+        BufReader, ReadHalf, WriteHalf,
     },
     net::{TcpListener, TcpStream},
     sync::mpsc,
@@ -54,6 +54,7 @@ async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box
     fs::create_dir_all(&path).await?;
     let filename = format!("{}/{}.eml", path, Uuid::new_v4());
     let mut file = File::create(&filename).await?;
+    println!("Started storing email to {}", filename);
     if !is_mime_valid(&body).await {
         file.write_all(format!("From: {}\r\n", from).as_bytes())
             .await?;
@@ -212,7 +213,7 @@ impl SMTPSession {
                 }
             }
             "DATA" => {
-                self.handle_data(reader, writer, tx, line).await;
+                self.handle_data(reader, writer, tx).await;
             }
             "QUIT" => {
                 self.handle_quit(writer).await;
@@ -239,7 +240,7 @@ impl SMTPSession {
         writer: &mut W,
         line: &mut String,
     ) {
-        writer.write_all(b"334 VXNlcm5hbWU6\r\n").await.ok();
+        self.write(writer, 334, "VXNlcm5hbWU6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
@@ -248,7 +249,7 @@ impl SMTPSession {
             .unwrap_or_default();
         let username = String::from_utf8_lossy(&username);
 
-        writer.write_all(b"334 UGFzc3dvcmQ6\r\n").await.ok();
+        self.write(writer, 334, "UGFzc3dvcmQ6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
@@ -280,7 +281,7 @@ impl SMTPSession {
             .unwrap_or_default();
         let username = String::from_utf8_lossy(&username);
 
-        writer.write_all(b"334 UGFzc3dvcmQ6\r\n").await.ok();
+        self.write(writer, 334, "UGFzc3dvcmQ6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
@@ -329,7 +330,6 @@ impl SMTPSession {
         reader: &mut R,
         writer: &mut W,
         tx: &mpsc::Sender<(String, HashSet<String>, String)>,
-        line: &mut String,
     ) {
         if !self.authenticated && self.auth_required {
             self.write(writer, 530, "Authentication required").await;
@@ -343,15 +343,25 @@ impl SMTPSession {
         self.write(writer, 354, "End data with <CR><LF>.<CR><LF>")
             .await;
 
-        let mut data = String::new();
+        let mut buffer = [0u8; 1024];
+        let mut buffer_all = Vec::<u8>::new();
+
         loop {
-            line.clear();
-            reader.read_line(line).await.ok();
-            if line == ".\r\n" {
-                break;
+            match reader.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = &buffer[..n];
+                    buffer_all.extend_from_slice(chunk);
+                    if chunk.ends_with(b".\r\n") {
+                        buffer_all.truncate(buffer_all.len() - 3);
+                        break;
+                    }
+                }
+                Err(_) => break,
             }
-            data.push_str(line);
         }
+
+        let data = String::from_utf8_lossy(&buffer_all).into_owned();
 
         let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
         self.write(writer, 250, "Message accepted").await;
@@ -368,11 +378,21 @@ impl SMTPSession {
         self.write(writer, 502, "Command not implemented").await;
     }
 
-    async fn write<W: AsyncWrite + Unpin>(&self, writer: &mut W, code: u16, message: &str) {
+    async fn write_inner<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        code: u16,
+        message: &str,
+        separator: &str,
+    ) {
         writer
-            .write_all(format!("{} {}\r\n", code, message).as_bytes())
+            .write_all(format!("{}{}{}\r\n", code, separator, message).as_bytes())
             .await
             .ok();
+    }
+
+    async fn write<W: AsyncWrite + Unpin>(&self, writer: &mut W, code: u16, message: &str) {
+        self.write_inner(writer, code, message, " ").await;
     }
 
     async fn write_multiple<W: AsyncWrite + Unpin>(
@@ -383,9 +403,8 @@ impl SMTPSession {
     ) {
         for (index, message) in messages.iter().enumerate() {
             let is_last = index == messages.len() - 1;
-            let dash = if is_last { " " } else { "-" };
-            self.write(writer, code, &format!("{}{}", dash, message))
-                .await;
+            let separator = if is_last { " " } else { "-" };
+            self.write_inner(writer, code, message, separator).await;
         }
     }
 }
@@ -397,10 +416,12 @@ async fn handle_loop(
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     session: &mut SMTPSession,
 ) {
-    let mut line = String::new();
+    let mut line = String::with_capacity(4096);
     let mut reader = BufReader::new(reader);
 
-    let _ = writer.write_all(b"220 localhost SimpleSMTP\r\n").await;
+    session
+        .write(&mut writer, 220, "localhost SimpleSMTP")
+        .await;
 
     loop {
         line.clear();
@@ -421,7 +442,7 @@ async fn handle_loop(
 
         match command.as_str() {
             "STARTTLS" => {
-                writer.write_all(b"220 Ready to start TLS\r\n").await.ok();
+                session.write(&mut writer, 220, "Ready to start TLS").await;
                 let stream = ReadHalf::unsplit(reader.into_inner(), writer);
                 match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => {
@@ -464,9 +485,9 @@ async fn handle_tls_session(
 ) {
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
+    let mut line = String::with_capacity(4096);
 
-    let _ = writer.write_all(b"220 TLS secured SMTP\r\n").await;
+    session.write(&mut writer, 220, "TLS secured SMTP").await;
 
     loop {
         line.clear();
