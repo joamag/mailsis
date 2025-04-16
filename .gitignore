@@ -6,3 +6,4 @@ Cargo.lock
 /mailbox
 
 /smtp/mailbox
+/smtp/examples/attachments
