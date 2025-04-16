@@ -225,9 +225,12 @@ impl SMTPSession {
     }
 
     async fn handle_ehlo_helo<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
-        writer.write_all(b"250-localhost greets you\r\n").await.ok();
-        writer.write_all(b"250-STARTTLS\r\n").await.ok();
-        writer.write_all(b"250 AUTH LOGIN\r\n").await.ok();
+        self.write_multiple(
+            writer,
+            250,
+            &["localhost greets you", "STARTTLS", "AUTH LOGIN"],
+        )
+        .await;
     }
 
     async fn handle_auth_login<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
@@ -370,6 +373,20 @@ impl SMTPSession {
             .write_all(format!("{} {}\r\n", code, message).as_bytes())
             .await
             .ok();
+    }
+
+    async fn write_multiple<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        code: u16,
+        messages: &[&str],
+    ) {
+        for (index, message) in messages.iter().enumerate() {
+            let is_last = index == messages.len() - 1;
+            let dash = if is_last { " " } else { "-" };
+            self.write(writer, code, &format!("{}{}", dash, message))
+                .await;
+        }
     }
 }
 
