@@ -1,19 +1,5 @@
-[package]
-name = "mailsis"
-description = "Simple (yet efficient) SMTP and IMAP server."
-version = "0.1.0"
-authors = ["João Magalhães <joamag@gmail.com>"]
-license = "Apache-2.0"
-repository = "https://github.com/joamag/mailsis"
-keywords = ["email", "smtp", "imap", "server"]
-edition = "2021"
-rust-version = "1.81"
-
-[dependencies]
-tokio = { version = "1", features = ["full"] }
-tokio-rustls = "0.24"
-rustls = "0.21"
-rustls-pemfile = "1"
-uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
-base64 = "0.21"
+[workspace]
+resolver = "2"
+members = [
+    "smtp"
+]
