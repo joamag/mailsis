@@ -1,10 +1,11 @@
 use base64::{engine::general_purpose, Engine as _};
-use rand::Rng;
+use mailsis_utils::generate_random_bytes;
 use std::{env::args, error::Error, path::Path};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
+use uuid::Uuid;
 
 const FILE_SIZE: usize = 100 * 1024 * 1024;
 const CHUNK_SIZE: usize = 16384;
@@ -68,14 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         (tokio::fs::read(&path).await?, filename)
     } else {
         println!("Generating random data...");
-        let mut rng = rand::thread_rng();
-        let chunk = (0..128).map(|_| rng.gen()).collect::<Vec<u8>>();
-        let num_chunks = FILE_SIZE / 128;
-        let mut file_data = Vec::with_capacity(FILE_SIZE);
-        for _ in 0..num_chunks {
-            file_data.extend_from_slice(&chunk);
-        }
-        file_data.extend((0..FILE_SIZE % 128).map(|_| rng.gen::<u8>()));
+        let file_data = generate_random_bytes(FILE_SIZE).await?;
         (file_data, "random.bin".to_string())
     };
 
@@ -83,25 +77,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let encoded_data = general_purpose::STANDARD.encode(&file_data);
 
     // Send email headers
+    let boundary = format!("boundary-{}", Uuid::new_v4());
     let headers = format!(
         "MIME-Version: 1.0\r\n\
                   From: sender@example.com\r\n\
                   To: recipient@example.com\r\n\
                   Subject: Test Email with Large Attachment\r\n\
-                  Content-Type: multipart/mixed; boundary=boundary123\r\n\
+                  Content-Type: multipart/mixed; boundary={}\r\n\
                   \r\n\
                   \r\n\
-                  --boundary123\r\n\
+                  --{}\r\n\
                   Content-Type: text/plain\r\n\
                   \r\n\
                   This is a test email with a large attachment.\r\n\
                   \r\n\
-                  --boundary123\r\n\
+                  --{}\r\n\
                   Content-Type: application/octet-stream\r\n\
                   Content-Transfer-Encoding: base64\r\n\
                   Content-Disposition: attachment; filename=\"{}\"\r\n\
                   \r\n",
-        filename
+        boundary, boundary, boundary, filename
     );
 
     writer.write_all(headers.as_bytes()).await?;

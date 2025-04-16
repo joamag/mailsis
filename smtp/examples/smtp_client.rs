@@ -2,11 +2,9 @@ use lettre::{
     message::{header, Message, MultiPart},
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
-use rand::Rng;
-use std::path::Path;
+use mailsis_utils::{generate_random_file, read_large_file};
 use std::time::Instant;
-use tokio::io::AsyncReadExt;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::fs::remove_file;
 
 /// Size of the random file in MB
 const FILE_SIZE_MB: usize = 100;
@@ -73,32 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Email sent successfully in {:?}", send_start.elapsed());
     println!("Total time: {:?}", start_time.elapsed());
 
-    tokio::fs::remove_file(file_path).await?;
-
-    Ok(())
-}
-
-async fn read_large_file(path: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
-    let mut file = File::open(path).await?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).await?;
-    Ok(buffer)
-}
-
-async fn generate_random_file(
-    path: impl AsRef<Path>,
-    size_mb: usize,
-) -> Result<(), std::io::Error> {
-    let mut file = File::create(path).await?;
-    let mut rng = rand::thread_rng();
-    let chunk_size = 1024 * 1024;
-    let total_chunks = size_mb;
-
-    for _ in 0..total_chunks {
-        let mut chunk = vec![0u8; chunk_size];
-        rng.fill(&mut chunk[..]);
-        AsyncWriteExt::write_all(&mut file, &chunk).await?;
-    }
+    remove_file(file_path).await?;
 
     Ok(())
 }

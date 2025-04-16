@@ -17,8 +17,8 @@ rustls-pemfile = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 base64 = "0.21"
+mailsis-utils = { path = "../crates/utils", version = "0.1.0" }
 
 [dev-dependencies]
-rand = "0.8"
 lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls"] }
 native-tls = "0.2"
