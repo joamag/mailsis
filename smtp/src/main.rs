@@ -78,7 +78,7 @@ async fn is_mime_valid(body: &str) -> bool {
     mime_type == "MIME-Version:"
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:2525").await?;
     let tls_config = Arc::new(load_tls_config().unwrap());
@@ -471,6 +471,11 @@ async fn handle_smtp_session(
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     credentials: Arc<HashMap<String, String>>,
 ) {
+    // Optimize TCP settings, removing the delay and setting the TTL to 64
+    stream.set_nodelay(true).expect("Failed to set TCP_NODELAY");
+    stream.set_linger(None).expect("Failed to set SO_LINGER");
+    stream.set_ttl(64).expect("Failed to set TTL");
+
     // Create a new SMTP session with default values, split the stream into reader and writer
     // and handle the loop starting the SMTP session
     let mut session = SMTPSession::new(credentials.clone(), false);

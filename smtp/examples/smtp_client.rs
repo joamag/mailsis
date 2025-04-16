@@ -1,10 +1,5 @@
 use lettre::{
     message::{header, Message, MultiPart},
-    transport::smtp::{
-        authentication::Credentials,
-        client::{Tls, TlsParameters},
-        SmtpTransport,
-    },
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
 use rand::Rng;
@@ -13,7 +8,8 @@ use std::time::Instant;
 use tokio::io::AsyncReadExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-const FILE_SIZE_MB: usize = 100; // Size of the random file in MB
+/// Size of the random file in MB
+const FILE_SIZE_MB: usize = 100;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,18 +22,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("File generated in {:?}", start_time.elapsed());
 
     // SMTP server configuration
-    let smtp_server = "localhost"; // Change this to your SMTP server address
-    let smtp_port = 2525; // Change this to your SMTP server port
-    let username = "test@example.com"; // Change this to your username
-    let password = "password"; // Change this to your password
+    let smtp_server = "localhost";
+    let smtp_port = 2525;
 
     println!("Connecting to SMTP server...");
     let connect_start = Instant::now();
 
-    // Create SMTP transport
-    let creds = Credentials::new(username.to_string(), password.to_string());
-
-    let tls_parameters = TlsParameters::new(smtp_server.to_string())?;
     let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(smtp_server)
         .port(smtp_port)
         //.tls(Tls::Required(tls_parameters))
