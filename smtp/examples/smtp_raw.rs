@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                   From: sender@example.com\r\n\
                   To: recipient@example.com\r\n\
                   Subject: Test Email with Large Attachment\r\n\
-                  Content-Type: multipart/mixed; boundary={}\r\n\
+                  Content-Type: multipart/mixed; boundary=\"{}\"\r\n\
                   \r\n\
                   \r\n\
                   --{}\r\n\
