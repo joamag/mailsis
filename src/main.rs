@@ -299,7 +299,6 @@ impl SMTPSession {
             self.write(writer, 530, "Authentication required").await;
         }
         if let Some(value) = value.strip_prefix("FROM:") {
-            println!("MAIL FROM: {}", value);
             self.from = value.trim().to_string();
             self.write(writer, 250, "OK").await;
         } else {
@@ -314,7 +313,6 @@ impl SMTPSession {
             return;
         }
         if let Some(value) = value.strip_prefix("TO:") {
-            println!("RCPT TO: {}", value);
             self.rcpts.insert(value.trim().to_string());
             self.write(writer, 250, "OK").await;
         } else {
