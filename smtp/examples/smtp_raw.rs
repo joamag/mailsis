@@ -46,11 +46,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut writer = writer_ssl;
 
     // Send MAIL FROM command
-    write_command(&mut writer, "MAIL FROM:<sender@example.com>").await?;
+    write_command(&mut writer, "MAIL FROM:<sender@localhost>").await?;
     read_response(&mut reader, &mut response).await?;
 
     // Send RCPT TO command
-    write_command(&mut writer, "RCPT TO:<recipient@example.com>").await?;
+    write_command(&mut writer, "RCPT TO:<recipient@localhost>").await?;
     read_response(&mut reader, &mut response).await?;
 
     // Send DATA command
@@ -81,8 +81,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &mut writer,
         &format!(
             "MIME-Version: 1.0\r\n\
-                  From: sender@example.com\r\n\
-                  To: recipient@example.com\r\n\
+                  From: sender@localhost\r\n\
+                  To: recipient@localhost\r\n\
                   Subject: Test Email with Large Attachment\r\n\
                   Content-Type: multipart/mixed; boundary=\"{}\"\r\n\
                   \r\n\

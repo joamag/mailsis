@@ -50,8 +50,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create email message
     let email = Message::builder()
-        .from("Test User <test@example.com>".parse()?)
-        .to("Recipient <recipient@example.com>".parse()?)
+        .from("Test User <sender@localhost>".parse()?)
+        .to("Recipient <recipient@localhost>".parse()?)
         .subject("Large File Test")
         .multipart(
             MultiPart::mixed()
