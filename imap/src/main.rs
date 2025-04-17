@@ -68,6 +68,7 @@ impl IMAPSession {
     ) -> Result<(), Box<dyn Error>> {
         match command {
             "LOGIN" => self.handle_login(writer, tag, parts).await,
+            "CAPABILITY" => self.handle_capability(writer, tag).await,
             _ => {
                 self.write_response(writer, tag, "BAD", "Unknown command")
                     .await
@@ -92,6 +93,16 @@ impl IMAPSession {
         Ok(())
     }
 
+    async fn handle_capability<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        tag: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.write_response(writer, "*", "CAPABILITY", "IMAP4rev1 AUTH=PLAIN").await?;
+        self.write_response(writer, tag, "OK", "CAPABILITY completed").await?;
+        Ok(())
+    }
+
     async fn write_inner<W: AsyncWrite + Unpin>(
         &self,
         writer: &mut W,
@@ -112,6 +123,7 @@ impl IMAPSession {
         result: &str,
         message: &str,
     ) -> Result<(), Box<dyn Error>> {
+        println!(">> {} {} {}", tag, result, message);
         self.write_inner(w, tag, result, message).await;
         Ok(())
     }
@@ -157,7 +169,7 @@ async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
         }
 
         let raw = line.trim_end();
-        println!(">> {raw}");
+        println!("<< {raw}");
 
         let parts: Vec<&str> = raw.split_whitespace().collect();
         if parts.len() < 2 {
@@ -171,6 +183,7 @@ async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
             .handle_command(&mut reader, &mut w, &tag, &command, &parts)
             .await?;
 
+            /*
         match command.as_str() {
             "LOGIN" => {
                 if parts.len() >= 4 {
@@ -286,7 +299,7 @@ async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
                 w.write_all(format!("{} BAD Unknown command\r\n", tag).as_bytes())
                     .await?;
             }
-        }
+        } */
     }
 
     Ok(())
