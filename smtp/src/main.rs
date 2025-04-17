@@ -4,7 +4,8 @@ use mailsis_utils::{get_crate_root, is_mime_valid, load_tls_server_config};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
-    str::SplitWhitespace,
+    path::PathBuf,
+    str::{FromStr, SplitWhitespace},
     sync::Arc,
 };
 use tokio::{
@@ -310,8 +311,8 @@ impl SMTPSession {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
-async fn main() -> std::io::Result<()> {
-    let crate_root = get_crate_root().unwrap();
+async fn main() -> Result<(), Box<dyn Error>> {
+    let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
 
     let cert_path = crate_root.join("certs").join("server.cert.pem");
     let key_path = crate_root.join("certs").join("server.key.pem");

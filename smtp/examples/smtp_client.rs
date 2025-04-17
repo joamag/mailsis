@@ -4,14 +4,14 @@ use lettre::{
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
 use mailsis_utils::{generate_random_file, get_crate_root, read_large_file};
-use std::time::Instant;
+use std::{error::Error, path::PathBuf, str::FromStr, time::Instant};
 use tokio::fs::remove_file;
 
 /// Size of the random file in MB
 const FILE_SIZE_MB: usize = 100;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let start_time = Instant::now();
 
     // Generate random file
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connecting to SMTP server...");
     let connect_start = Instant::now();
 
-    let crate_root = get_crate_root().unwrap();
+    let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".")?);
     let ca_path = crate_root.join("certs").join("ca.cert.pem");
     let ca_cert = read_large_file(ca_path.to_str().unwrap()).await?;
 
