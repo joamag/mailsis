@@ -393,7 +393,7 @@ async fn handle_loop(
     let mut reader = BufReader::new(reader);
 
     session
-        .write(&mut writer, 220, "localhost SimpleSMTP")
+        .write(&mut writer, 220, "localhost Mailsis SMTP")
         .await;
 
     loop {
