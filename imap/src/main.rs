@@ -1,5 +1,8 @@
-use tokio::{net::TcpListener, io::{AsyncBufReadExt, AsyncWriteExt, BufReader}};
 use std::collections::HashMap;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::{TcpListener, TcpStream},
+};
 
 #[derive(Debug, Clone)]
 struct Message {
@@ -23,12 +26,31 @@ impl Mailbox {
 
     fn add_message(&mut self, content: String) -> u32 {
         let uid = self.next_uid;
-        self.messages.insert(uid, Message {
-            content,
-            flags: vec!["\\Recent".to_string()],
-        });
+        self.messages.insert(
+            uid,
+            Message {
+                content,
+                flags: vec!["\\Recent".to_string()],
+            },
+        );
         self.next_uid += 1;
         uid
+    }
+}
+
+struct IMAPSession {
+    authenticated: bool,
+    auth_required: bool,
+    mailboxes: Option<Mailbox>,
+}
+
+impl Default for IMAPSession {
+    fn default() -> Self {
+        Self {
+            authenticated: false,
+            auth_required: false,
+            mailboxes: None,
+        }
     }
 }
 
@@ -47,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn handle_client(stream: tokio::net::TcpStream) -> anyhow::Result<()> {
+async fn handle_client(stream: TcpStream) -> anyhow::Result<()> {
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut line = String::new();
@@ -56,7 +78,7 @@ async fn handle_client(stream: tokio::net::TcpStream) -> anyhow::Result<()> {
     let mut selected_mailbox: Option<Mailbox> = None;
     let mut tag = "*".to_string();
 
-    w.write_all(b"* OK Simple IMAP ready\r\n").await?;
+    w.write_all(b"* OK Mailsis IMAP ready\r\n").await?;
 
     loop {
         line.clear();
@@ -80,44 +102,60 @@ async fn handle_client(stream: tokio::net::TcpStream) -> anyhow::Result<()> {
             "LOGIN" => {
                 if parts.len() >= 4 {
                     authenticated = true;
-                    w.write_all(format!("{} OK LOGIN completed\r\n", tag).as_bytes()).await?;
+                    w.write_all(format!("{} OK LOGIN completed\r\n", tag).as_bytes())
+                        .await?;
                 } else {
-                    w.write_all(format!("{} BAD Invalid login\r\n", tag).as_bytes()).await?;
+                    w.write_all(format!("{} BAD Invalid login\r\n", tag).as_bytes())
+                        .await?;
                 }
             }
             "LIST" => {
-                w.write_all(b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n").await?;
-                w.write_all(format!("{} OK LIST completed\r\n", tag).as_bytes()).await?;
+                w.write_all(b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n")
+                    .await?;
+                w.write_all(format!("{} OK LIST completed\r\n", tag).as_bytes())
+                    .await?;
             }
             "SELECT" => {
                 if let Some(mbox) = parts.get(2) {
                     if mbox.to_uppercase() == "INBOX" {
                         selected_mailbox = Some(Mailbox::new());
                         let count = selected_mailbox.as_ref().unwrap().messages.len();
-                        w.write_all(format!("* {count} EXISTS\r\n").as_bytes()).await?;
+                        w.write_all(format!("* {count} EXISTS\r\n").as_bytes())
+                            .await?;
                         w.write_all(b"* OK [UIDVALIDITY 1] UIDs valid\r\n").await?;
-                        w.write_all(format!("{} OK SELECT completed\r\n", tag).as_bytes()).await?;
+                        w.write_all(format!("{} OK SELECT completed\r\n", tag).as_bytes())
+                            .await?;
                     } else {
-                        w.write_all(format!("{} NO Mailbox does not exist\r\n", tag).as_bytes()).await?;
+                        w.write_all(format!("{} NO Mailbox does not exist\r\n", tag).as_bytes())
+                            .await?;
                     }
                 } else {
-                    w.write_all(format!("{} BAD Missing mailbox name\r\n", tag).as_bytes()).await?;
+                    w.write_all(format!("{} BAD Missing mailbox name\r\n", tag).as_bytes())
+                        .await?;
                 }
             }
             "FETCH" => {
                 if let Some(mailbox) = &selected_mailbox {
                     if let Ok(seq) = parts[2].parse::<u32>() {
                         if let Some(msg) = mailbox.messages.get(&seq) {
-                            w.write_all(format!("* {seq} FETCH (FLAGS ({}))\r\n", msg.flags.join(" ")).as_bytes()).await?;
-                            w.write_all(format!("{} OK FETCH completed\r\n", tag).as_bytes()).await?;
+                            w.write_all(
+                                format!("* {seq} FETCH (FLAGS ({}))\r\n", msg.flags.join(" "))
+                                    .as_bytes(),
+                            )
+                            .await?;
+                            w.write_all(format!("{} OK FETCH completed\r\n", tag).as_bytes())
+                                .await?;
                         } else {
-                            w.write_all(format!("{} NO No such message\r\n", tag).as_bytes()).await?;
+                            w.write_all(format!("{} NO No such message\r\n", tag).as_bytes())
+                                .await?;
                         }
                     } else {
-                        w.write_all(format!("{} BAD Invalid message number\r\n", tag).as_bytes()).await?;
+                        w.write_all(format!("{} BAD Invalid message number\r\n", tag).as_bytes())
+                            .await?;
                     }
                 } else {
-                    w.write_all(format!("{} NO No mailbox selected\r\n", tag).as_bytes()).await?;
+                    w.write_all(format!("{} NO No mailbox selected\r\n", tag).as_bytes())
+                        .await?;
                 }
             }
             "STORE" => {
@@ -126,7 +164,9 @@ async fn handle_client(stream: tokio::net::TcpStream) -> anyhow::Result<()> {
                         if let Ok(seq) = parts[2].parse::<u32>() {
                             if let Some(msg) = mailbox.messages.get_mut(&seq) {
                                 let mode = parts[3];
-                                let flags: Vec<String> = parts[4..].join(" ").replace(['(', ')'], "")
+                                let flags: Vec<String> = parts[4..]
+                                    .join(" ")
+                                    .replace(['(', ')'], "")
                                     .split_whitespace()
                                     .map(|s| s.to_string())
                                     .collect();
@@ -137,28 +177,41 @@ async fn handle_client(stream: tokio::net::TcpStream) -> anyhow::Result<()> {
                                     "FLAGS" => msg.flags = flags,
                                     _ => {}
                                 }
-                                w.write_all(format!("* {seq} FETCH (FLAGS ({}))\r\n", msg.flags.join(" ")).as_bytes()).await?;
-                                w.write_all(format!("{} OK STORE completed\r\n", tag).as_bytes()).await?;
+                                w.write_all(
+                                    format!("* {seq} FETCH (FLAGS ({}))\r\n", msg.flags.join(" "))
+                                        .as_bytes(),
+                                )
+                                .await?;
+                                w.write_all(format!("{} OK STORE completed\r\n", tag).as_bytes())
+                                    .await?;
                             } else {
-                                w.write_all(format!("{} NO No such message\r\n", tag).as_bytes()).await?;
+                                w.write_all(format!("{} NO No such message\r\n", tag).as_bytes())
+                                    .await?;
                             }
                         } else {
-                            w.write_all(format!("{} BAD Invalid message number\r\n", tag).as_bytes()).await?;
+                            w.write_all(
+                                format!("{} BAD Invalid message number\r\n", tag).as_bytes(),
+                            )
+                            .await?;
                         }
                     } else {
-                        w.write_all(format!("{} BAD STORE syntax\r\n", tag).as_bytes()).await?;
+                        w.write_all(format!("{} BAD STORE syntax\r\n", tag).as_bytes())
+                            .await?;
                     }
                 } else {
-                    w.write_all(format!("{} NO No mailbox selected\r\n", tag).as_bytes()).await?;
+                    w.write_all(format!("{} NO No mailbox selected\r\n", tag).as_bytes())
+                        .await?;
                 }
             }
             "LOGOUT" => {
                 w.write_all(b"* BYE Logging out\r\n").await?;
-                w.write_all(format!("{} OK LOGOUT completed\r\n", tag).as_bytes()).await?;
+                w.write_all(format!("{} OK LOGOUT completed\r\n", tag).as_bytes())
+                    .await?;
                 break;
             }
             _ => {
-                w.write_all(format!("{} BAD Unknown command\r\n", tag).as_bytes()).await?;
+                w.write_all(format!("{} BAD Unknown command\r\n", tag).as_bytes())
+                    .await?;
             }
         }
     }

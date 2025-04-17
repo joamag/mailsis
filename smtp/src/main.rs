@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use mailsis_utils::{get_crate_root, load_tls_server_config};
+use mailsis_utils::{get_crate_root, is_mime_valid, load_tls_server_config};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -37,100 +37,6 @@ impl Default for SMTPSession {
             credentials: Arc::new(HashMap::new()),
         }
     }
-}
-
-/// Stores the email in the mailbox directory, creates the directory if it doesn't exist.
-/// Each user has their own directory, and each email is stored in a file named with a UUID.
-///
-/// There's no limit to the number of emails that can be stored.
-async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box<dyn Error>> {
-    let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-    let path = format!("mailbox/{}", safe_rcpt);
-    fs::create_dir_all(&path).await?;
-    let filename = format!("{}/{}.eml", path, Uuid::new_v4());
-    let mut file = File::create(&filename).await?;
-    println!("Started storing email to {}", filename);
-    if !is_mime_valid(&body).await {
-        file.write_all(format!("From: {}\r\n", from).as_bytes())
-            .await?;
-        file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
-            .await?;
-        file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
-            .await?;
-    }
-    file.write_all(body.as_bytes()).await?;
-    println!("Stored: {}", filename);
-    Ok(())
-}
-
-/// Checks if the email is a valid MIME email.
-///
-/// A valid MIME email starts with a line that contains "MIME-Version:".
-async fn is_mime_valid(body: &str) -> bool {
-    let mut lines = body.lines();
-    let first_line = lines.next().unwrap_or("");
-    let mime_type = first_line.split_whitespace().next().unwrap_or("");
-    mime_type == "MIME-Version:"
-}
-
-#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
-async fn main() -> std::io::Result<()> {
-    let crate_root = get_crate_root().unwrap();
-
-    let cert_path = crate_root.join("certs").join("server.cert.pem");
-    let key_path = crate_root.join("certs").join("server.key.pem");
-
-    let tls_config = Arc::new(
-        load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).unwrap(),
-    );
-
-    let listener = TcpListener::bind("127.0.0.1:2525").await?;
-    let tls_acceptor = TlsAcceptor::from(tls_config);
-    let credentials = Arc::new(load_credentials("users.txt"));
-    let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
-
-    // Spawn a task to handle the email storage, this is a long running
-    // task that will run until the program is terminated
-    tokio::spawn(async move {
-        while let Some((from, rcpts, body)) = rx.recv().await {
-            for rcpt in rcpts {
-                if let Err(error) = store_email(from.clone(), rcpt, body.clone()).await {
-                    println!("Error storing email: {}", error);
-                }
-            }
-        }
-    });
-
-    println!("Mailsis SMTP running on port 2525");
-
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let tls_acceptor = tls_acceptor.clone();
-        let tx = tx.clone();
-        let credentials = credentials.clone();
-        tokio::spawn(async move {
-            handle_smtp_session(stream, tls_acceptor, tx, credentials).await;
-        });
-    }
-}
-
-/// Loads the credentials from the file and returns a HashMap of usernames and passwords.
-///
-/// The file should be formatted as follows:
-/// username:password
-/// username2:password2
-/// username3:password3
-/// ...
-fn load_credentials(path: &str) -> HashMap<String, String> {
-    let mut creds = HashMap::new();
-    if let Ok(content) = std::fs::read_to_string(path) {
-        for line in content.lines() {
-            if let Some((user, pass)) = line.split_once(':') {
-                creds.insert(user.trim().to_string(), pass.trim().to_string());
-            }
-        }
-    }
-    creds
 }
 
 impl SMTPSession {
@@ -382,6 +288,47 @@ impl SMTPSession {
     }
 }
 
+#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
+async fn main() -> std::io::Result<()> {
+    let crate_root = get_crate_root().unwrap();
+
+    let cert_path = crate_root.join("certs").join("server.cert.pem");
+    let key_path = crate_root.join("certs").join("server.key.pem");
+
+    let tls_config = Arc::new(
+        load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).unwrap(),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:2525").await?;
+    let tls_acceptor = TlsAcceptor::from(tls_config);
+    let credentials = Arc::new(load_credentials("users.txt"));
+    let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
+
+    // Spawn a task to handle the email storage, this is a long running
+    // task that will run until the program is terminated
+    tokio::spawn(async move {
+        while let Some((from, rcpts, body)) = rx.recv().await {
+            for rcpt in rcpts {
+                if let Err(error) = store_email(from.clone(), rcpt, body.clone()).await {
+                    println!("Error storing email: {}", error);
+                }
+            }
+        }
+    });
+
+    println!("Mailsis SMTP running on port 2525");
+
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let tls_acceptor = tls_acceptor.clone();
+        let tx = tx.clone();
+        let credentials = credentials.clone();
+        tokio::spawn(async move {
+            handle_smtp_session(stream, tls_acceptor, tx, credentials).await;
+        });
+    }
+}
+
 async fn handle_loop(
     reader: ReadHalf<TcpStream>,
     mut writer: WriteHalf<TcpStream>,
@@ -487,4 +434,47 @@ async fn handle_tls_session(
             .handle_base(&mut reader, &mut writer, &tx, &mut line, &command, arg)
             .await;
     }
+}
+
+/// Loads the credentials from the file and returns a HashMap of usernames and passwords.
+///
+/// The file should be formatted as follows:
+/// username:password
+/// username2:password2
+/// username3:password3
+/// ...
+fn load_credentials(path: &str) -> HashMap<String, String> {
+    let mut creds = HashMap::new();
+    if let Ok(content) = std::fs::read_to_string(path) {
+        for line in content.lines() {
+            if let Some((user, pass)) = line.split_once(':') {
+                creds.insert(user.trim().to_string(), pass.trim().to_string());
+            }
+        }
+    }
+    creds
+}
+
+/// Stores the email in the mailbox directory, creates the directory if it doesn't exist.
+/// Each user has their own directory, and each email is stored in a file named with a UUID.
+///
+/// There's no limit to the number of emails that can be stored.
+async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box<dyn Error>> {
+    let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+    let path = format!("mailbox/{}", safe_rcpt);
+    fs::create_dir_all(&path).await?;
+    let filename = format!("{}/{}.eml", path, Uuid::new_v4());
+    let mut file = File::create(&filename).await?;
+    println!("Started storing email to {}", filename);
+    if !is_mime_valid(&body).await {
+        file.write_all(format!("From: {}\r\n", from).as_bytes())
+            .await?;
+        file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
+            .await?;
+        file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
+            .await?;
+    }
+    file.write_all(body.as_bytes()).await?;
+    println!("Stored: {}", filename);
+    Ok(())
 }
