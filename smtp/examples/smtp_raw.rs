@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
-use mailsis_utils::generate_random_bytes;
-use rustls::{ClientConfig, RootCertStore, ServerName};
+use mailsis_utils::{generate_random_bytes, load_tls_client_config};
+use rustls::ServerName;
 use std::{env::args, error::Error, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -145,12 +145,7 @@ async fn upgrade_to_tls(
     plain_stream: TcpStream,
     domain: &str,
 ) -> Result<TlsStream<TcpStream>, Box<dyn std::error::Error>> {
-    let root_store = RootCertStore::empty();
-
-    let config = ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    let config = load_tls_client_config()?;
 
     let connector = TlsConnector::from(Arc::new(config));
     let server_name = ServerName::try_from(domain)?;
