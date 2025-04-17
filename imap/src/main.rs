@@ -4,6 +4,9 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
+const HOST: &str = "127.0.0.1";
+const PORT: u16 = 1430;
+
 #[derive(Debug, Clone)]
 struct Message {
     content: String,
@@ -56,15 +59,15 @@ impl Default for IMAPSession {
 
 impl IMAPSession {
     async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
-        &self,
+        &mut self,
         reader: &mut R,
         writer: &mut W,
         tag: &str,
         command: &str,
-        argument: Option<&str>,
+        parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
         match command {
-            "LOGIN" => self.handle_login(reader, writer, tag, argument).await,
+            "LOGIN" => self.handle_login(writer, tag, parts).await,
             _ => {
                 self.write_response(writer, tag, "BAD", "Unknown command")
                     .await
@@ -72,17 +75,19 @@ impl IMAPSession {
         }
     }
 
-    async fn handle_login<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
-        &self,
-        reader: &mut R,
+    async fn handle_login<W: AsyncWrite + Unpin>(
+        &mut self,
         writer: &mut W,
         tag: &str,
-        argument: Option<&str>,
+        parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
-        if let Some(argument) = argument {
-            let parts: Vec<&str> = argument.splitn(2).collect();
-            let username = parts[0];
-            let password = parts[1];
+        if parts.len() >= 4 {
+            self.authenticated = true;
+            self.write_response(writer, tag, "OK", "LOGIN completed")
+                .await?;
+        } else {
+            self.write_response(writer, tag, "BAD", "Invalid login")
+                .await?;
         }
         Ok(())
     }
@@ -114,8 +119,10 @@ impl IMAPSession {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("127.0.0.1:1430").await?;
-    println!("IMAP server listening on 1430");
+    let listening = format!("{}:{}", HOST, PORT);
+    let listener = TcpListener::bind(&listening).await?;
+
+    println!("Mailsis-IMAP running on {}", &listening);
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -136,7 +143,7 @@ async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let mut selected_mailbox: Option<Mailbox> = None;
     let mut tag = "*".to_string();
 
-    let session = IMAPSession::default();
+    let mut session = IMAPSession::default();
 
     session
         .write_response(&mut w, "*", "OK", "Mailsis IMAP ready")
@@ -159,6 +166,10 @@ async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
 
         tag = parts[0].to_string();
         let command = parts[1].to_uppercase();
+
+        session
+            .handle_command(&mut reader, &mut w, &tag, &command, &parts)
+            .await?;
 
         match command.as_str() {
             "LOGIN" => {

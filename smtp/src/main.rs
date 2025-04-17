@@ -383,7 +383,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    println!("Mailsis-SMTP running on {}", listening);
+    println!("Mailsis-SMTP running on {}", &listening);
 
     loop {
         let (stream, _) = listener.accept().await?;
