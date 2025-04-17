@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use mailsis_utils::generate_random_bytes;
 use std::{env::args, error::Error, path::Path};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 use uuid::Uuid;
@@ -21,45 +21,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
 
-    // Read server greeting
     let mut response = String::new();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+
+    // Read server greeting
+    read_response(&mut reader, &mut response).await?;
 
     // Send EHLO command
-    writer.write_all(b"EHLO localhost\r\n").await?;
-    response.clear();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+    write_command(&mut writer, "EHLO localhost").await?;
+    read_response(&mut reader, &mut response).await?;
 
     // Read additional EHLO response lines
     while response.starts_with("250-") {
-        response.clear();
-        reader.read_line(&mut response).await?;
-        println!("Server: {}", response.trim());
+        read_response(&mut reader, &mut response).await?;
     }
 
     // Send MAIL FROM command
-    writer
-        .write_all(b"MAIL FROM:<sender@example.com>\r\n")
-        .await?;
-    response.clear();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+    write_command(&mut writer, "MAIL FROM:<sender@example.com>").await?;
+    read_response(&mut reader, &mut response).await?;
 
     // Send RCPT TO command
-    writer
-        .write_all(b"RCPT TO:<recipient@example.com>\r\n")
-        .await?;
-    response.clear();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+    write_command(&mut writer, "RCPT TO:<recipient@example.com>").await?;
+    read_response(&mut reader, &mut response).await?;
 
     // Send DATA command
-    writer.write_all(b"DATA\r\n").await?;
-    response.clear();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+    write_command(&mut writer, "DATA").await?;
+    read_response(&mut reader, &mut response).await?;
 
     let (file_data, filename) = if args().len() > 1 {
         let path = args().nth(1).unwrap();
@@ -81,8 +67,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Send email headers
     let boundary = format!("boundary-{}", Uuid::new_v4());
-    let headers = format!(
-        "MIME-Version: 1.0\r\n\
+    write_command(
+        &mut writer,
+        &format!(
+            "MIME-Version: 1.0\r\n\
                   From: sender@example.com\r\n\
                   To: recipient@example.com\r\n\
                   Subject: Test Email with Large Attachment\r\n\
@@ -97,12 +85,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                   --{}\r\n\
                   Content-Type: application/octet-stream\r\n\
                   Content-Transfer-Encoding: base64\r\n\
-                  Content-Disposition: attachment; filename=\"{}\"\r\n\
-                  \r\n",
-        boundary, boundary, boundary, filename
-    );
-
-    writer.write_all(headers.as_bytes()).await?;
+                  Content-Disposition: attachment; filename=\"{}\"\r\n",
+            boundary, boundary, boundary, filename
+        ),
+    )
+    .await?;
 
     println!("Sending data...");
     let send_start = std::time::Instant::now();
@@ -114,15 +101,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Send the final boundary and end of message
     writer.write_all(b"\r\n--boundary123--\r\n.\r\n").await?;
-    response.clear();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+    read_response(&mut reader, &mut response).await?;
 
     // Send QUIT command
-    writer.write_all(b"QUIT\r\n").await?;
-    response.clear();
-    reader.read_line(&mut response).await?;
-    println!("Server: {}", response.trim());
+    write_command(&mut writer, "QUIT").await?;
+    read_response(&mut reader, &mut response).await?;
 
+    Ok(())
+}
+
+async fn write_command<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    message: &str,
+) -> Result<(), Box<dyn Error>> {
+    writer
+        .write_all(format!("{}\r\n", message).as_bytes())
+        .await?;
+    Ok(())
+}
+
+async fn read_response<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    response: &mut String,
+) -> Result<(), Box<dyn Error>> {
+    response.clear();
+    reader.read_line(response).await?;
+    println!("Server: {}", response.trim());
     Ok(())
 }
