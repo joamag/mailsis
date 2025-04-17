@@ -1,12 +1,11 @@
 use base64::{engine::general_purpose, Engine as _};
 use mailsis_utils::{generate_random_bytes, load_tls_client_config};
-use rustls::ServerName;
 use std::{env::args, error::Error, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
-use tokio_rustls::{TlsConnector, TlsStream};
+use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector, TlsStream};
 use uuid::Uuid;
 
 /// Size of the random file in bytes
@@ -148,7 +147,7 @@ async fn upgrade_to_tls(
     let config = load_tls_client_config()?;
 
     let connector = TlsConnector::from(Arc::new(config));
-    let server_name = ServerName::try_from(domain)?;
+    let server_name = ServerName::try_from(domain)?.to_owned();
 
     let tls_stream = TlsStream::Client(connector.connect(server_name, plain_stream).await?);
 

@@ -1,10 +1,14 @@
-use rustls::{server::ServerSessionMemoryCache, ClientConfig, RootCertStore};
-use rustls_pemfile::{certs, pkcs8_private_keys};
-use tokio_rustls::rustls::{Certificate, ServerConfig};
+use rustls::{
+    pki_types::{
+        pem::{PemObject, SectionKind},
+        CertificateDer, PrivateKeyDer,
+    },
+    server::ServerSessionMemoryCache,
+    ClientConfig, RootCertStore, ServerConfig,
+};
+use rustls_pemfile::certs;
 
 use std::{error::Error, fs::File, io::BufReader};
-
-use tokio_rustls::rustls::PrivateKey;
 
 /// Loads the TLS configuration from the files and returns a ServerConfig.
 ///
@@ -18,7 +22,6 @@ pub fn load_tls_server_config(
     // Create a new server config with the certificate chain and private key
     let (cert_chain, key) = load_chain_and_key(cert_path, key_path)?;
     let mut config = ServerConfig::builder()
-        .with_safe_defaults()
         .with_no_client_auth()
         .with_single_cert(cert_chain, key)?;
 
@@ -32,7 +35,6 @@ pub fn load_tls_client_config() -> Result<ClientConfig, Box<dyn Error>> {
     let root_store: RootCertStore = RootCertStore::empty();
 
     let config = ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_no_client_auth();
 
@@ -47,7 +49,6 @@ pub fn load_tls_client_config_cert(
     let root_store: RootCertStore = RootCertStore::empty();
     let (cert_chain, key) = load_chain_and_key(cert_path, key_path)?;
     let config = ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_client_auth_cert(cert_chain, key)?;
 
@@ -57,18 +58,16 @@ pub fn load_tls_client_config_cert(
 fn load_chain_and_key(
     cert_path: &str,
     key_path: &str,
-) -> Result<(Vec<Certificate>, PrivateKey), Box<dyn Error>> {
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Box<dyn Error>> {
     // Load the certificate chain from the cert file
     let cert_file = &mut BufReader::new(File::open(cert_path)?);
-    let cert_chain = certs(cert_file)
-        .unwrap()
+    let cert_chain = certs(cert_file)?
         .into_iter()
-        .map(Certificate)
-        .collect();
+        .map(|der| CertificateDer::from_pem(SectionKind::Certificate, der).unwrap())
+        .collect::<Vec<_>>();
 
-    // Load the private key from the key file as PKCS8
-    let key_file = &mut BufReader::new(File::open(key_path)?);
-    let mut keys = pkcs8_private_keys(key_file)?;
+    // Load the private key from the key file
+    let key = PrivateKeyDer::from_pem_file(key_path)?;
 
-    Ok((cert_chain, PrivateKey(keys.remove(0))))
+    Ok((cert_chain, key))
 }

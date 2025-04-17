@@ -1,5 +1,6 @@
 use lettre::{
     message::{header, Message, MultiPart},
+    transport::smtp::client::{Tls, TlsParameters},
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
 use mailsis_utils::{generate_random_file, read_large_file};
@@ -26,10 +27,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connecting to SMTP server...");
     let connect_start = Instant::now();
 
+    let tls_parameters = TlsParameters::new(smtp_server.to_string())?;
     let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(smtp_server)
         .port(smtp_port)
-        //.tls(Tls::Required(tls_parameters))
-        //.credentials(creds)
+        .tls(Tls::Required(tls_parameters))
         .build();
 
     println!(
