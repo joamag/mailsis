@@ -8,7 +8,7 @@ use rustls::{
 };
 use rustls_pemfile::certs;
 
-use std::{error::Error, fs::File, io::BufReader};
+use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
 
 use crate::get_crate_root;
 
@@ -34,15 +34,7 @@ pub fn load_tls_server_config(
 }
 
 pub fn load_tls_client_config() -> Result<ClientConfig, Box<dyn Error>> {
-    let crate_root = get_crate_root().unwrap();
-    let ca_path = crate_root.join("certs").join("ca.cert.pem");
-    println!("CA certificate path: {:?}", ca_path);
-    let cert_chain = load_ca_cert(
-        ca_path
-            .to_str()
-            .ok_or("Failed to get CA certificate path")?,
-    )?;
-    println!("CA certificate path: {:?}", ca_path);
+    let cert_chain = load_default_ca_cert()?;
     let mut root_store: RootCertStore = RootCertStore::empty();
     root_store.add_parsable_certificates(cert_chain);
 
@@ -57,7 +49,7 @@ pub fn load_tls_client_config_cert(
     cert_path: &str,
     key_path: &str,
 ) -> Result<ClientConfig, Box<dyn Error>> {
-    let cert_chain = load_ca_cert("ca.cert.pem")?;
+    let cert_chain = load_default_ca_cert()?;
     let mut root_store: RootCertStore = RootCertStore::empty();
     root_store.add_parsable_certificates(cert_chain);
 
@@ -85,6 +77,21 @@ fn load_chain_and_key(
     let key = PrivateKeyDer::from_pem_file(key_path)?;
 
     Ok((cert_chain, key))
+}
+
+pub fn ca_cert_path() -> Result<PathBuf, Box<dyn Error>> {
+    let crate_root = get_crate_root()?;
+    let ca_path = crate_root.join("certs").join("ca.cert.pem");
+    Ok(ca_path)
+}
+
+pub fn load_default_ca_cert() -> Result<Vec<CertificateDer<'static>>, Box<dyn Error>> {
+    let cert_chain = load_ca_cert(
+        ca_cert_path()?
+            .to_str()
+            .ok_or("Failed to get CA certificate path")?,
+    )?;
+    Ok(cert_chain)
 }
 
 fn load_ca_cert(cert_path: &str) -> Result<Vec<CertificateDer<'static>>, Box<dyn Error>> {

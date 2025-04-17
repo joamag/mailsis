@@ -1,9 +1,9 @@
 use lettre::{
     message::{header, Message, MultiPart},
-    transport::smtp::client::{Tls, TlsParameters},
+    transport::smtp::client::{Certificate, Tls, TlsParameters},
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
-use mailsis_utils::{generate_random_file, read_large_file};
+use mailsis_utils::{generate_random_file, get_crate_root, read_large_file};
 use std::time::Instant;
 use tokio::fs::remove_file;
 
@@ -27,7 +27,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connecting to SMTP server...");
     let connect_start = Instant::now();
 
-    let tls_parameters = TlsParameters::new(smtp_server.to_string())?;
+    let crate_root = get_crate_root().unwrap();
+    let ca_path = crate_root.join("certs").join("ca.cert.pem");
+    let ca_cert = read_large_file(ca_path.to_str().unwrap()).await?;
+
+    let tls_parameters = TlsParameters::builder(smtp_server.to_string())
+        .add_root_certificate(Certificate::from_pem(&ca_cert)?)
+        .build()?;
+
     let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(smtp_server)
         .port(smtp_port)
         .tls(Tls::Required(tls_parameters))
