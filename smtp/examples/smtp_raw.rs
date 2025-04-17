@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Send email headers
     let boundary = format!("boundary-{}", Uuid::new_v4());
-    write_command(
+    write_data(
         &mut writer,
         &format!(
             "MIME-Version: 1.0\r\n\
@@ -95,7 +95,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                   --{}\r\n\
                   Content-Type: application/octet-stream\r\n\
                   Content-Transfer-Encoding: base64\r\n\
-                  Content-Disposition: attachment; filename=\"{}\"\r\n",
+                  Content-Disposition: attachment; filename=\"{}\"\r\n\
+                  \r\n",
             boundary, boundary, boundary, filename
         ),
     )
@@ -124,9 +125,18 @@ async fn write_command<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &str,
 ) -> Result<(), Box<dyn Error>> {
+    println!("[Client] > {}", message);
     writer
         .write_all(format!("{}\r\n", message).as_bytes())
         .await?;
+    Ok(())
+}
+
+async fn write_data<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    message: &str,
+) -> Result<(), Box<dyn Error>> {
+    writer.write_all(message.as_bytes()).await?;
     Ok(())
 }
 
@@ -136,7 +146,7 @@ async fn read_response<R: AsyncBufRead + Unpin>(
 ) -> Result<(), Box<dyn Error>> {
     response.clear();
     reader.read_line(response).await?;
-    println!("Server: {}", response.trim());
+    println!("[Server] > {}", response.trim());
     Ok(())
 }
 

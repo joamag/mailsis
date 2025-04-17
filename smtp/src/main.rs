@@ -257,6 +257,27 @@ impl SMTPSession {
         self.write(writer, 502, "Command not implemented").await;
     }
 
+    async fn read_command<'a, R: AsyncRead + AsyncBufRead + Unpin>(
+        &mut self,
+        reader: &mut R,
+        line: &'a mut String,
+    ) -> (String, String, Option<String>) {
+        line.clear();
+
+        reader.read_line(line).await.unwrap_or(0);
+
+        let line_clone = line.clone();
+
+        let mut parts: SplitWhitespace<'_> = line.split_whitespace();
+        let command = parts.next().unwrap_or("").trim_end().to_uppercase();
+        let argument = match parts.next() {
+            Some(arg) => Some(arg.trim_end().to_string()),
+            None => None,
+        };
+
+        return (line_clone, command, argument);
+    }
+
     async fn write_inner<W: AsyncWrite + Unpin>(
         &self,
         writer: &mut W,
@@ -329,62 +350,6 @@ async fn main() -> std::io::Result<()> {
     }
 }
 
-async fn handle_loop(
-    reader: ReadHalf<TcpStream>,
-    mut writer: WriteHalf<TcpStream>,
-    tls_acceptor: TlsAcceptor,
-    tx: mpsc::Sender<(String, HashSet<String>, String)>,
-    session: &mut SMTPSession,
-) {
-    let mut line = String::with_capacity(4096);
-    let mut reader = BufReader::new(reader);
-
-    session
-        .write(&mut writer, 220, "localhost Mailsis SMTP")
-        .await;
-
-    loop {
-        line.clear();
-
-        let bytes = reader.read_line(&mut line).await.unwrap_or(0);
-        if bytes == 0 {
-            break;
-        }
-
-        let line_clone = line.clone();
-
-        let cmd = line_clone.trim_end();
-        let mut parts: SplitWhitespace<'_> = cmd.split_whitespace();
-        let command = parts.next().unwrap_or("").to_uppercase();
-        let arg = parts.next();
-
-        println!("> {}", cmd);
-
-        match command.as_str() {
-            "STARTTLS" => {
-                session.write(&mut writer, 220, "Ready to start TLS").await;
-                let stream = ReadHalf::unsplit(reader.into_inner(), writer);
-                match tls_acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
-                        println!("TLS handshake complete");
-                        return handle_tls_session(TlsStream::Server(tls_stream), tx, session)
-                            .await;
-                    }
-                    Err(e) => {
-                        eprintln!("TLS handshake failed: {:?}", e);
-                        return;
-                    }
-                }
-            }
-            _ => {
-                session
-                    .handle_base(&mut reader, &mut writer, &tx, &mut line, &command, arg)
-                    .await;
-            }
-        }
-    }
-}
-
 async fn handle_smtp_session(
     stream: TcpStream,
     tls_acceptor: TlsAcceptor,
@@ -400,10 +365,63 @@ async fn handle_smtp_session(
     // and handle the loop starting the SMTP session
     let mut session = SMTPSession::new(credentials.clone(), false);
     let (reader, writer) = split(stream);
-    handle_loop(reader, writer, tls_acceptor, tx, &mut session).await;
+    handle_stream(reader, writer, tls_acceptor, tx, &mut session).await;
 }
 
-async fn handle_tls_session(
+async fn handle_stream(
+    reader: ReadHalf<TcpStream>,
+    mut writer: WriteHalf<TcpStream>,
+    tls_acceptor: TlsAcceptor,
+    tx: mpsc::Sender<(String, HashSet<String>, String)>,
+    session: &mut SMTPSession,
+) {
+    let mut line = String::with_capacity(4096);
+    let mut reader = BufReader::new(reader);
+
+    session
+        .write(&mut writer, 220, "localhost Mailsis SMTP")
+        .await;
+
+    loop {
+        let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
+        if line == "" {
+            break;
+        }
+
+        println!("> {}", command);
+
+        match command.as_str() {
+            "STARTTLS" => {
+                session.write(&mut writer, 220, "Ready to start TLS").await;
+                let stream = ReadHalf::unsplit(reader.into_inner(), writer);
+                match tls_acceptor.accept(stream).await {
+                    Ok(tls_stream) => {
+                        println!("TLS handshake complete");
+                        return handle_tls_stream(TlsStream::Server(tls_stream), tx, session).await;
+                    }
+                    Err(e) => {
+                        eprintln!("TLS handshake failed: {:?}", e);
+                        return;
+                    }
+                }
+            }
+            _ => {
+                session
+                    .handle_base(
+                        &mut reader,
+                        &mut writer,
+                        &tx,
+                        &mut line,
+                        &command,
+                        argument.as_deref(),
+                    )
+                    .await;
+            }
+        }
+    }
+}
+
+async fn handle_tls_stream(
     stream: TlsStream<TcpStream>,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     session: &mut SMTPSession,
@@ -415,23 +433,22 @@ async fn handle_tls_session(
     session.write(&mut writer, 220, "TLS secured SMTP").await;
 
     loop {
-        line.clear();
-        let bytes = reader.read_line(&mut line).await.unwrap_or(0);
-        if bytes == 0 {
+        let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
+        if line == "" {
             break;
         }
 
-        let line_clone = line.clone();
-
-        let cmd = &line_clone.trim_end();
-        println!("(TLS) > {}", cmd);
-
-        let mut parts = cmd.split_whitespace();
-        let command = parts.next().unwrap_or("").to_uppercase();
-        let arg = parts.next();
+        println!("[TLS] > {}", command);
 
         session
-            .handle_base(&mut reader, &mut writer, &tx, &mut line, &command, arg)
+            .handle_base(
+                &mut reader,
+                &mut writer,
+                &tx,
+                &mut line,
+                &command,
+                argument.as_deref(),
+            )
             .await;
     }
 }
