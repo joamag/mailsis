@@ -63,19 +63,19 @@ impl SMTPSession {
         line: &mut String,
         command: &String,
         arg: Option<&str>,
-    ) {
+    ) -> Result<(), Box<dyn Error>> {
         match command.as_str() {
             "EHLO" | "HELO" => {
-                self.handle_ehlo_helo(writer).await;
+                self.handle_ehlo_helo(writer).await?;
             }
             "AUTH" if arg == Some("LOGIN") => {
-                self.handle_auth_login(reader, writer, line).await;
+                self.handle_auth_login(reader, writer, line).await?;
             }
             "AUTH" => {
                 if let Some(arg) = arg {
                     if let Some(encoded_user) = arg.strip_prefix("LOGIN") {
                         self.handle_auth_with_username(reader, writer, line, encoded_user)
-                            .await;
+                            .await?;
                     } else {
                         self.write_response(writer, 504, "Unrecognized authentication type")
                             .await;
@@ -87,33 +87,38 @@ impl SMTPSession {
             }
             "MAIL" => {
                 if let Some(value) = arg {
-                    self.handle_mail(writer, value).await;
+                    self.handle_mail(writer, value).await?;
                 }
             }
             "RCPT" => {
                 if let Some(value) = arg {
-                    self.handle_rcpt(writer, value).await;
+                    self.handle_rcpt(writer, value).await?;
                 }
             }
             "DATA" => {
-                self.handle_data(reader, writer, tx).await;
+                self.handle_data(reader, writer, tx).await?;
             }
             "QUIT" => {
-                self.handle_quit(writer).await;
+                self.handle_quit(writer).await?;
             }
             _ => {
-                self.handle_unknown(writer).await;
+                self.handle_unknown(writer).await?;
             }
         }
+        Ok(())
     }
 
-    async fn handle_ehlo_helo<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
+    async fn handle_ehlo_helo<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), Box<dyn Error>> {
         self.write_multiple(
             writer,
             250,
             &["localhost greets you", "STARTTLS", "AUTH LOGIN"],
         )
         .await;
+        Ok(())
     }
 
     async fn handle_auth_login<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
@@ -121,7 +126,7 @@ impl SMTPSession {
         reader: &mut R,
         writer: &mut W,
         line: &mut String,
-    ) {
+    ) -> Result<(), Box<dyn Error>> {
         self.write_response(writer, 334, "VXNlcm5hbWU6").await;
 
         line.clear();
@@ -148,6 +153,7 @@ impl SMTPSession {
             self.write_response(writer, 535, "Authentication failed")
                 .await;
         }
+        Ok(())
     }
 
     async fn handle_auth_with_username<
@@ -159,7 +165,7 @@ impl SMTPSession {
         writer: &mut W,
         line: &mut String,
         encoded_user: &str,
-    ) {
+    ) -> Result<(), Box<dyn Error>> {
         let username = general_purpose::STANDARD
             .decode(encoded_user.trim())
             .unwrap_or_default();
@@ -182,9 +188,15 @@ impl SMTPSession {
             self.write_response(writer, 535, "Authentication failed")
                 .await;
         }
+
+        Ok(())
     }
 
-    async fn handle_mail<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
+    async fn handle_mail<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        value: &str,
+    ) -> Result<(), Box<dyn Error>> {
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
                 .await;
@@ -196,13 +208,18 @@ impl SMTPSession {
             self.write_response(writer, 501, "Syntax error in parameters or arguments")
                 .await;
         }
+        Ok(())
     }
 
-    async fn handle_rcpt<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
+    async fn handle_rcpt<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        value: &str,
+    ) -> Result<(), Box<dyn Error>> {
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
                 .await;
-            return;
+            return Ok(());
         }
         if let Some(value) = value.strip_prefix("TO:") {
             self.rcpts.insert(value.trim().to_string());
@@ -211,6 +228,7 @@ impl SMTPSession {
             self.write_response(writer, 501, "Syntax error in parameters or arguments")
                 .await;
         }
+        Ok(())
     }
 
     async fn handle_data<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
@@ -218,16 +236,16 @@ impl SMTPSession {
         reader: &mut R,
         writer: &mut W,
         tx: &mpsc::Sender<(String, HashSet<String>, String)>,
-    ) {
+    ) -> Result<(), Box<dyn Error>> {
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
                 .await;
-            return;
+            return Ok(());
         }
         if self.rcpts.is_empty() {
             self.write_response(writer, 554, "No valid recipients")
                 .await;
-            return;
+            return Ok(());
         }
 
         self.write_response(writer, 354, "End data with <CR><LF>.<CR><LF>")
@@ -258,15 +276,25 @@ impl SMTPSession {
 
         self.from.clear();
         self.rcpts.clear();
+
+        Ok(())
     }
 
-    async fn handle_quit<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
+    async fn handle_quit<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), Box<dyn Error>> {
         self.write_response(writer, 221, "Bye").await;
+        Ok(())
     }
 
-    async fn handle_unknown<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
+    async fn handle_unknown<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), Box<dyn Error>> {
         self.write_response(writer, 502, "Command not implemented")
             .await;
+        Ok(())
     }
 
     async fn read_command<'a, R: AsyncRead + AsyncBufRead + Unpin>(
@@ -363,7 +391,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let tx = tx.clone();
         let credentials = credentials.clone();
         tokio::spawn(async move {
-            handle_smtp_session(stream, tls_acceptor, tx, credentials).await;
+            handle_smtp_session(stream, tls_acceptor, tx, credentials)
+                .await
+                .unwrap();
         });
     }
 }
@@ -373,7 +403,7 @@ async fn handle_smtp_session(
     tls_acceptor: TlsAcceptor,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     credentials: Arc<HashMap<String, String>>,
-) {
+) -> Result<(), Box<dyn Error>> {
     // Optimize TCP settings, removing the delay and setting the TTL to 64
     stream.set_nodelay(true).expect("Failed to set TCP_NODELAY");
     stream.set_linger(None).expect("Failed to set SO_LINGER");
@@ -383,7 +413,8 @@ async fn handle_smtp_session(
     // and handle the loop starting the SMTP session
     let mut session = SMTPSession::new(credentials.clone(), false);
     let (reader, writer) = split(stream);
-    handle_stream(reader, writer, tls_acceptor, tx, &mut session).await;
+    handle_stream(reader, writer, tls_acceptor, tx, &mut session).await?;
+    Ok(())
 }
 
 async fn handle_stream(
@@ -392,7 +423,7 @@ async fn handle_stream(
     tls_acceptor: TlsAcceptor,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     session: &mut SMTPSession,
-) {
+) -> Result<(), Box<dyn Error>> {
     let mut line = String::with_capacity(4096);
     let mut reader = BufReader::new(reader);
 
@@ -421,7 +452,7 @@ async fn handle_stream(
                     }
                     Err(e) => {
                         eprintln!("TLS handshake failed: {:?}", e);
-                        return;
+                        return Ok(());
                     }
                 }
             }
@@ -435,17 +466,18 @@ async fn handle_stream(
                         &command,
                         argument.as_deref(),
                     )
-                    .await;
+                    .await?;
             }
         }
     }
+    Ok(())
 }
 
 async fn handle_tls_stream(
     stream: TlsStream<TcpStream>,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     session: &mut SMTPSession,
-) {
+) -> Result<(), Box<dyn Error>> {
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     let mut line = String::with_capacity(4096);
@@ -471,8 +503,9 @@ async fn handle_tls_stream(
                 &command,
                 argument.as_deref(),
             )
-            .await;
+            .await?;
     }
+    Ok(())
 }
 
 /// Loads the credentials from the file and returns a HashMap of usernames and passwords.

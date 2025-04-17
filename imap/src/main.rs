@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
 
@@ -55,6 +55,38 @@ impl Default for IMAPSession {
 }
 
 impl IMAPSession {
+    async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        tag: &str,
+        command: &str,
+        argument: Option<&str>,
+    ) -> Result<(), Box<dyn Error>> {
+        match command {
+            "LOGIN" => self.handle_login(reader, writer, tag, argument).await,
+            _ => {
+                self.write_response(writer, tag, "BAD", "Unknown command")
+                    .await
+            }
+        }
+    }
+
+    async fn handle_login<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        tag: &str,
+        argument: Option<&str>,
+    ) -> Result<(), Box<dyn Error>> {
+        if let Some(argument) = argument {
+            let parts: Vec<&str> = argument.splitn(2).collect();
+            let username = parts[0];
+            let password = parts[1];
+        }
+        Ok(())
+    }
+
     async fn write_inner<W: AsyncWrite + Unpin>(
         &self,
         writer: &mut W,
