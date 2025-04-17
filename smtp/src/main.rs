@@ -28,6 +28,7 @@ struct SMTPSession {
     rcpts: HashSet<String>,
     authenticated: bool,
     auth_required: bool,
+    starttls: bool,
     credentials: Arc<HashMap<String, String>>,
 }
 
@@ -38,6 +39,7 @@ impl Default for SMTPSession {
             rcpts: HashSet::new(),
             authenticated: false,
             auth_required: false,
+            starttls: false,
             credentials: Arc::new(HashMap::new()),
         }
     }
@@ -202,7 +204,12 @@ impl SMTPSession {
                 .await;
         }
         if let Some(value) = value.strip_prefix("FROM:") {
-            self.from = value.trim().to_string();
+            self.from = value
+                .trim()
+                .strip_prefix("<")
+                .and_then(|s| s.strip_suffix(">"))
+                .unwrap()
+                .to_string();
             self.write_response(writer, 250, "OK").await;
         } else {
             self.write_response(writer, 501, "Syntax error in parameters or arguments")
@@ -222,7 +229,14 @@ impl SMTPSession {
             return Ok(());
         }
         if let Some(value) = value.strip_prefix("TO:") {
-            self.rcpts.insert(value.trim().to_string());
+            self.rcpts.insert(
+                value
+                    .trim()
+                    .strip_prefix("<")
+                    .and_then(|s| s.strip_suffix(">"))
+                    .unwrap()
+                    .to_string(),
+            );
             self.write_response(writer, 250, "OK").await;
         } else {
             self.write_response(writer, 501, "Syntax error in parameters or arguments")
@@ -325,6 +339,13 @@ impl SMTPSession {
         message: &str,
         separator: &str,
     ) {
+        println!(
+            ">> {}{}{}{}",
+            if self.starttls { "[TLS] " } else { "" },
+            code,
+            separator,
+            message
+        );
         writer
             .write_all(format!("{}{}{}\r\n", code, separator, message).as_bytes())
             .await
@@ -437,7 +458,7 @@ async fn handle_stream(
             break;
         }
 
-        println!("> {}", command);
+        println!("<< {}", line.trim());
 
         match command.as_str() {
             "STARTTLS" => {
@@ -448,6 +469,7 @@ async fn handle_stream(
                 match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => {
                         println!("TLS handshake complete");
+                        session.starttls = true;
                         return handle_tls_stream(TlsStream::Server(tls_stream), tx, session).await;
                     }
                     Err(e) => {
@@ -488,7 +510,7 @@ async fn handle_tls_stream(
             break;
         }
 
-        println!("[TLS] > {}", command);
+        println!("<< [TLS] {}", line.trim());
 
         session
             .handle_command(

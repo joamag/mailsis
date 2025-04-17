@@ -1,5 +1,7 @@
-use std::error::Error;
+use mailsis_utils::get_crate_root;
+use std::{error::Error, path::PathBuf, str::FromStr};
 use tokio::{
+    fs::{read_dir, read_to_string},
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
@@ -9,6 +11,7 @@ const PORT: u16 = 1430;
 
 struct IMAPSession {
     authenticated: bool,
+    username: Option<String>,
     mailbox: Option<String>,
 }
 
@@ -16,6 +19,7 @@ impl Default for IMAPSession {
     fn default() -> Self {
         Self {
             authenticated: false,
+            username: None,
             mailbox: None,
         }
     }
@@ -52,6 +56,7 @@ impl IMAPSession {
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 4 {
             self.authenticated = true;
+            self.username = Some(parts[2].to_string());
             self.write_response(writer, tag, "OK", "LOGIN completed")
                 .await?;
         } else {
@@ -67,6 +72,8 @@ impl IMAPSession {
         tag: &str,
     ) -> Result<(), Box<dyn Error>> {
         self.authenticated = false;
+        self.username = None;
+        self.mailbox = None;
         self.write_response(writer, tag, "OK", "LOGOUT completed")
             .await?;
         Ok(())
@@ -120,8 +127,21 @@ impl IMAPSession {
         tag: &str,
         parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
-        if parts.len() >= 2 {
-            let message_id = parts[1].to_string();
+        if parts.len() >= 4 {
+            let message_id = parts[2].to_string();
+            let message_sequence = 1;
+            let format = parts[3].to_string();
+            let format_inner = format[1..format.len() - 1].to_string();
+            let message = self.fetch_message(&message_id).await?;
+            self.write_response(
+                writer,
+                "*",
+                &message_sequence.to_string(),
+                format!("FETCH ({} {{{}}}", format_inner, message.len()).as_str(),
+            )
+            .await?;
+            self.write_raw(writer, &message).await;
+            self.write_raw(writer, ")\r\n").await;
             self.write_response(writer, tag, "OK", "FETCH completed")
                 .await?;
         } else {
@@ -131,13 +151,26 @@ impl IMAPSession {
         Ok(())
     }
 
-    async fn search_messages(&self, criteria: &str) -> Result<Vec<u32>, Box<dyn Error>> {
-        let messages = vec![1, 2, 3, 4, 5];
+    async fn search_messages(&self, criteria: &str) -> Result<Vec<String>, Box<dyn Error>> {
+        let mut messages = Vec::new();
+        let mut entries = read_dir(&self.mailbox_path()).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+            let path_str = entry_path.to_str().unwrap();
+            if path_str.ends_with(".eml") {
+                let file_name = entry_path.file_name().unwrap().to_str().unwrap();
+                messages.push(file_name.to_string());
+            }
+        }
+
         Ok(messages)
     }
 
     async fn fetch_message(&self, message_id: &str) -> Result<String, Box<dyn Error>> {
-        Ok(message)
+        let path = self.mailbox_path().join(message_id);
+        let content = read_to_string(path).await?;
+        Ok(content)
     }
 
     async fn handle_capability<W: AsyncWrite + Unpin>(
@@ -150,6 +183,11 @@ impl IMAPSession {
         self.write_response(writer, tag, "OK", "CAPABILITY completed")
             .await?;
         Ok(())
+    }
+
+    async fn write_raw<W: AsyncWrite + Unpin>(&self, writer: &mut W, data: &str) {
+        println!(">> [DATA] {} bytes", data.len());
+        writer.write_all(data.as_bytes()).await.ok();
     }
 
     async fn write_inner<W: AsyncWrite + Unpin>(
@@ -175,6 +213,18 @@ impl IMAPSession {
         println!(">> {} {} {}", tag, result, message);
         self.write_inner(w, tag, result, message).await;
         Ok(())
+    }
+
+    fn mailbox_path(&self) -> PathBuf {
+        let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
+        crate_root.join("mailbox").join(self.safe_username())
+    }
+
+    fn safe_username(&self) -> String {
+        self.username
+            .clone()
+            .unwrap_or_default()
+            .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
     }
 }
 

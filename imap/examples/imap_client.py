@@ -7,7 +7,7 @@ from email.header import decode_header
 
 IMAP_SERVER = "127.0.0.1"
 IMAP_PORT = 1430
-EMAIL_ACCOUNT = "joao@localhost"
+EMAIL_ACCOUNT = "recipient@example.com"
 PASSWORD = "password"
 
 # Connect and login
