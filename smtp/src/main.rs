@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use mailsis_utils::load_tls_server_config;
+use mailsis_utils::{get_crate_root, load_tls_server_config};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -75,8 +75,16 @@ async fn is_mime_valid(body: &str) -> bool {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> std::io::Result<()> {
+    let crate_root = get_crate_root().unwrap();
+
+    let cert_path = crate_root.join("certs").join("server.cert.pem");
+    let key_path = crate_root.join("certs").join("server.key.pem");
+
+    let tls_config = Arc::new(
+        load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).unwrap(),
+    );
+
     let listener = TcpListener::bind("127.0.0.1:2525").await?;
-    let tls_config = Arc::new(load_tls_server_config("cert.pem", "key.pem").unwrap());
     let tls_acceptor = TlsAcceptor::from(tls_config);
     let credentials = Arc::new(load_credentials("users.txt"));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
