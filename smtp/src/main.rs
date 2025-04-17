@@ -482,10 +482,6 @@ async fn handle_tls_stream(
     let mut reader = BufReader::new(reader);
     let mut line = String::with_capacity(4096);
 
-    session
-        .write_response(&mut writer, 220, "TLS secured SMTP")
-        .await;
-
     loop {
         let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
         if line == "" {
@@ -533,11 +529,13 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
 /// There's no limit to the number of emails that can be stored.
 async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box<dyn Error>> {
     let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-    let path = format!("mailbox/{}", safe_rcpt);
+    let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
+    let path = crate_root.join("mailbox").join(safe_rcpt);
     fs::create_dir_all(&path).await?;
-    let filename = format!("{}/{}.eml", path, Uuid::new_v4());
-    let mut file = File::create(&filename).await?;
-    println!("Started storing email to {}", filename);
+    let file_path = path.join(format!("{}.eml", Uuid::new_v4()));
+    let file_path_str = file_path.to_str().unwrap();
+    let mut file = File::create(&file_path).await?;
+    println!("Started storing email to {}", file_path_str);
     if !is_mime_valid(&body).await {
         file.write_all(format!("From: {}\r\n", from).as_bytes())
             .await?;
@@ -547,6 +545,6 @@ async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box
             .await?;
     }
     file.write_all(body.as_bytes()).await?;
-    println!("Stored: {}", filename);
+    println!("Stored: {}", file_path_str);
     Ok(())
 }

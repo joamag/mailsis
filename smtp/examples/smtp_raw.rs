@@ -125,7 +125,7 @@ async fn write_command<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &str,
 ) -> Result<(), Box<dyn Error>> {
-    println!("[Client] > {}", message);
+    println!(">> {}", message);
     writer
         .write_all(format!("{}\r\n", message).as_bytes())
         .await?;
@@ -146,7 +146,7 @@ async fn read_response<R: AsyncBufRead + Unpin>(
 ) -> Result<(), Box<dyn Error>> {
     response.clear();
     reader.read_line(response).await?;
-    println!("[Server] > {}", response.trim());
+    println!("<< {}", response.trim());
     Ok(())
 }
 

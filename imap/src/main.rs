@@ -34,6 +34,8 @@ impl IMAPSession {
             "LOGIN" => self.handle_login(writer, tag, parts).await,
             "LOGOUT" => self.handle_logout(writer, tag).await,
             "SELECT" | "EXAMINE" => self.handle_select(writer, tag, parts).await,
+            "SEARCH" => self.handle_search(writer, tag, parts).await,
+            "FETCH" => self.handle_fetch(writer, tag, parts).await,
             "CAPABILITY" => self.handle_capability(writer, tag).await,
             _ => {
                 self.write_response(writer, tag, "BAD", "Unknown command")
@@ -85,6 +87,57 @@ impl IMAPSession {
                 .await?;
         }
         Ok(())
+    }
+
+    async fn handle_search<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        tag: &str,
+        parts: &[&str],
+    ) -> Result<(), Box<dyn Error>> {
+        if parts.len() >= 2 {
+            let criteria = parts[1].to_string();
+            let messages = self.search_messages(&criteria).await?;
+            let messages_str = messages
+                .into_iter()
+                .map(|m| m.to_string())
+                .collect::<Vec<String>>()
+                .join(" ");
+            self.write_response(writer, "*", "SEARCH", &messages_str)
+                .await?;
+            self.write_response(writer, tag, "OK", "SEARCH completed")
+                .await?;
+        } else {
+            self.write_response(writer, tag, "BAD", "Invalid search criteria")
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn handle_fetch<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        tag: &str,
+        parts: &[&str],
+    ) -> Result<(), Box<dyn Error>> {
+        if parts.len() >= 2 {
+            let message_id = parts[1].to_string();
+            self.write_response(writer, tag, "OK", "FETCH completed")
+                .await?;
+        } else {
+            self.write_response(writer, tag, "BAD", "Invalid message ID")
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn search_messages(&self, criteria: &str) -> Result<Vec<u32>, Box<dyn Error>> {
+        let messages = vec![1, 2, 3, 4, 5];
+        Ok(messages)
+    }
+
+    async fn fetch_message(&self, message_id: &str) -> Result<String, Box<dyn Error>> {
+        Ok(message)
     }
 
     async fn handle_capability<W: AsyncWrite + Unpin>(
