@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Data sent in {:?}", send_start.elapsed());
 
     // Send the final boundary and end of message
-    writer.write_all(b"\r\n--boundary123--\r\n.\r\n").await?;
+    write_data(&mut writer, &format!("\r\n--{}--\r\n.\r\n", boundary)).await?;
     read_response(&mut reader, &mut response).await?;
 
     // Send QUIT command

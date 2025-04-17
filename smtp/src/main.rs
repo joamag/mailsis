@@ -20,6 +20,9 @@ use tokio::{
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use uuid::Uuid;
 
+const HOST: &str = "127.0.0.1";
+const PORT: u16 = 2525;
+
 struct SMTPSession {
     from: String,
     rcpts: HashSet<String>,
@@ -52,7 +55,7 @@ impl SMTPSession {
 
     /// Base handler for the SMTP commands, should concentrate all the
     /// command handling in a single place for better maintainability.
-    pub async fn handle_base<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+    pub async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
         &mut self,
         reader: &mut R,
         writer: &mut W,
@@ -74,11 +77,11 @@ impl SMTPSession {
                         self.handle_auth_with_username(reader, writer, line, encoded_user)
                             .await;
                     } else {
-                        self.write(writer, 504, "Unrecognized authentication type")
+                        self.write_response(writer, 504, "Unrecognized authentication type")
                             .await;
                     }
                 } else {
-                    self.write(writer, 504, "Unrecognized authentication type")
+                    self.write_response(writer, 504, "Unrecognized authentication type")
                         .await;
                 }
             }
@@ -99,7 +102,6 @@ impl SMTPSession {
                 self.handle_quit(writer).await;
             }
             _ => {
-                println!("Unknown command: {}", command);
                 self.handle_unknown(writer).await;
             }
         }
@@ -120,7 +122,7 @@ impl SMTPSession {
         writer: &mut W,
         line: &mut String,
     ) {
-        self.write(writer, 334, "VXNlcm5hbWU6").await;
+        self.write_response(writer, 334, "VXNlcm5hbWU6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
@@ -129,7 +131,7 @@ impl SMTPSession {
             .unwrap_or_default();
         let username = String::from_utf8_lossy(&username);
 
-        self.write(writer, 334, "UGFzc3dvcmQ6").await;
+        self.write_response(writer, 334, "UGFzc3dvcmQ6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
@@ -139,10 +141,12 @@ impl SMTPSession {
         let password = String::from_utf8_lossy(&password);
 
         if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
-            self.write(writer, 235, "Authentication successful").await;
+            self.write_response(writer, 235, "Authentication successful")
+                .await;
             self.authenticated = true;
         } else {
-            self.write(writer, 535, "Authentication failed").await;
+            self.write_response(writer, 535, "Authentication failed")
+                .await;
         }
     }
 
@@ -161,7 +165,7 @@ impl SMTPSession {
             .unwrap_or_default();
         let username = String::from_utf8_lossy(&username);
 
-        self.write(writer, 334, "UGFzc3dvcmQ6").await;
+        self.write_response(writer, 334, "UGFzc3dvcmQ6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
@@ -171,36 +175,40 @@ impl SMTPSession {
         let password = String::from_utf8_lossy(&password);
 
         if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
-            self.write(writer, 235, "Authentication successful").await;
+            self.write_response(writer, 235, "Authentication successful")
+                .await;
             self.authenticated = true;
         } else {
-            self.write(writer, 535, "Authentication failed").await;
+            self.write_response(writer, 535, "Authentication failed")
+                .await;
         }
     }
 
     async fn handle_mail<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
         if !self.authenticated && self.auth_required {
-            self.write(writer, 530, "Authentication required").await;
+            self.write_response(writer, 530, "Authentication required")
+                .await;
         }
         if let Some(value) = value.strip_prefix("FROM:") {
             self.from = value.trim().to_string();
-            self.write(writer, 250, "OK").await;
+            self.write_response(writer, 250, "OK").await;
         } else {
-            self.write(writer, 501, "Syntax error in parameters or arguments")
+            self.write_response(writer, 501, "Syntax error in parameters or arguments")
                 .await;
         }
     }
 
     async fn handle_rcpt<W: AsyncWrite + Unpin>(&mut self, writer: &mut W, value: &str) {
         if !self.authenticated && self.auth_required {
-            self.write(writer, 530, "Authentication required").await;
+            self.write_response(writer, 530, "Authentication required")
+                .await;
             return;
         }
         if let Some(value) = value.strip_prefix("TO:") {
             self.rcpts.insert(value.trim().to_string());
-            self.write(writer, 250, "OK").await;
+            self.write_response(writer, 250, "OK").await;
         } else {
-            self.write(writer, 501, "Syntax error in parameters or arguments")
+            self.write_response(writer, 501, "Syntax error in parameters or arguments")
                 .await;
         }
     }
@@ -212,15 +220,17 @@ impl SMTPSession {
         tx: &mpsc::Sender<(String, HashSet<String>, String)>,
     ) {
         if !self.authenticated && self.auth_required {
-            self.write(writer, 530, "Authentication required").await;
+            self.write_response(writer, 530, "Authentication required")
+                .await;
             return;
         }
         if self.rcpts.is_empty() {
-            self.write(writer, 554, "No valid recipients").await;
+            self.write_response(writer, 554, "No valid recipients")
+                .await;
             return;
         }
 
-        self.write(writer, 354, "End data with <CR><LF>.<CR><LF>")
+        self.write_response(writer, 354, "End data with <CR><LF>.<CR><LF>")
             .await;
 
         let mut buffer = [0u8; 1024];
@@ -244,18 +254,19 @@ impl SMTPSession {
         let data = String::from_utf8_lossy(&buffer_all).into_owned();
 
         let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
-        self.write(writer, 250, "Message accepted").await;
+        self.write_response(writer, 250, "Message accepted").await;
 
         self.from.clear();
         self.rcpts.clear();
     }
 
     async fn handle_quit<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
-        self.write(writer, 221, "Bye").await;
+        self.write_response(writer, 221, "Bye").await;
     }
 
     async fn handle_unknown<W: AsyncWrite + Unpin>(&self, writer: &mut W) {
-        self.write(writer, 502, "Command not implemented").await;
+        self.write_response(writer, 502, "Command not implemented")
+            .await;
     }
 
     async fn read_command<'a, R: AsyncRead + AsyncBufRead + Unpin>(
@@ -292,7 +303,12 @@ impl SMTPSession {
             .ok();
     }
 
-    async fn write<W: AsyncWrite + Unpin>(&self, writer: &mut W, code: u16, message: &str) {
+    async fn write_response<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        code: u16,
+        message: &str,
+    ) {
         self.write_inner(writer, code, message, " ").await;
     }
 
@@ -321,7 +337,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).unwrap(),
     );
 
-    let listener = TcpListener::bind("127.0.0.1:2525").await?;
+    let listening = format!("{}:{}", HOST, PORT);
+    let listener = TcpListener::bind(&listening).await?;
     let tls_acceptor = TlsAcceptor::from(tls_config);
     let credentials = Arc::new(load_credentials("users.txt"));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
@@ -338,7 +355,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    println!("Mailsis SMTP running on port 2525");
+    println!("Mailsis-SMTP running on {}", listening);
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -380,7 +397,7 @@ async fn handle_stream(
     let mut reader = BufReader::new(reader);
 
     session
-        .write(&mut writer, 220, "localhost Mailsis SMTP")
+        .write_response(&mut writer, 220, "localhost Mailsis SMTP")
         .await;
 
     loop {
@@ -393,7 +410,9 @@ async fn handle_stream(
 
         match command.as_str() {
             "STARTTLS" => {
-                session.write(&mut writer, 220, "Ready to start TLS").await;
+                session
+                    .write_response(&mut writer, 220, "Ready to start TLS")
+                    .await;
                 let stream = ReadHalf::unsplit(reader.into_inner(), writer);
                 match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => {
@@ -408,7 +427,7 @@ async fn handle_stream(
             }
             _ => {
                 session
-                    .handle_base(
+                    .handle_command(
                         &mut reader,
                         &mut writer,
                         &tx,
@@ -431,7 +450,9 @@ async fn handle_tls_stream(
     let mut reader = BufReader::new(reader);
     let mut line = String::with_capacity(4096);
 
-    session.write(&mut writer, 220, "TLS secured SMTP").await;
+    session
+        .write_response(&mut writer, 220, "TLS secured SMTP")
+        .await;
 
     loop {
         let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
@@ -442,7 +463,7 @@ async fn handle_tls_stream(
         println!("[TLS] > {}", command);
 
         session
-            .handle_base(
+            .handle_command(
                 &mut reader,
                 &mut writer,
                 &tx,

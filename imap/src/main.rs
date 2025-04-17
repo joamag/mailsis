@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
 
@@ -54,6 +54,32 @@ impl Default for IMAPSession {
     }
 }
 
+impl IMAPSession {
+    async fn write_inner<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+        tag: &str,
+        result: &str,
+        message: &str,
+    ) {
+        writer
+            .write_all(format!("{} {} {}\r\n", tag, result, message).as_bytes())
+            .await
+            .ok();
+    }
+
+    async fn write_response<W: AsyncWrite + Unpin>(
+        &self,
+        w: &mut W,
+        tag: &str,
+        result: &str,
+        message: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.write_inner(w, tag, result, message).await;
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:1430").await?;
@@ -69,7 +95,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn handle_client(stream: TcpStream) -> anyhow::Result<()> {
+async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut line = String::new();
@@ -78,7 +104,11 @@ async fn handle_client(stream: TcpStream) -> anyhow::Result<()> {
     let mut selected_mailbox: Option<Mailbox> = None;
     let mut tag = "*".to_string();
 
-    w.write_all(b"* OK Mailsis IMAP ready\r\n").await?;
+    let session = IMAPSession::default();
+
+    session
+        .write_response(&mut w, "*", "OK", "Mailsis IMAP ready")
+        .await?;
 
     loop {
         line.clear();
