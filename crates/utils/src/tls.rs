@@ -11,7 +11,10 @@ use tokio_rustls::rustls::PrivateKey;
 /// The files should be structured as follows:
 /// cert.pem: The certificate file.
 /// key.pem: The private key file.
-pub fn load_tls_server_config(cert_path: &str, key_path: &str) -> Result<ServerConfig, Box<dyn Error>> {
+pub fn load_tls_server_config(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<ServerConfig, Box<dyn Error>> {
     // Create a new server config with the certificate chain and private key
     let (cert_chain, key) = load_chain_and_key(cert_path, key_path)?;
     let mut config = ServerConfig::builder()
@@ -36,7 +39,25 @@ pub fn load_tls_client_config() -> Result<ClientConfig, Box<dyn Error>> {
     Ok(config)
 }
 
-fn load_chain_and_key(cert_path: &str, key_path: &str) -> Result<(Vec<Certificate>, PrivateKey), Box<dyn Error>> {
+pub fn load_tls_client_config_cert(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<ClientConfig, Box<dyn Error>> {
+    // Create a new server config with the certificate chain and private key
+    let root_store: RootCertStore = RootCertStore::empty();
+    let (cert_chain, key) = load_chain_and_key(cert_path, key_path)?;
+    let config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store)
+        .with_client_auth_cert(cert_chain, key)?;
+
+    Ok(config)
+}
+
+fn load_chain_and_key(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<(Vec<Certificate>, PrivateKey), Box<dyn Error>> {
     // Load the certificate chain from the cert file
     let cert_file = &mut BufReader::new(File::open(cert_path)?);
     let cert_chain = certs(cert_file)
