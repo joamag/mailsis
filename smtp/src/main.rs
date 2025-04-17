@@ -7,6 +7,7 @@ use std::{
     error::Error,
     fs::File as StdFile,
     io::BufReader as StdBufReader,
+    str::SplitWhitespace,
     sync::Arc,
 };
 use tokio::{
@@ -434,7 +435,7 @@ async fn handle_loop(
         let line_clone = line.clone();
 
         let cmd = line_clone.trim_end();
-        let mut parts: std::str::SplitWhitespace<'_> = cmd.split_whitespace();
+        let mut parts: SplitWhitespace<'_> = cmd.split_whitespace();
         let command = parts.next().unwrap_or("").to_uppercase();
         let arg = parts.next();
 

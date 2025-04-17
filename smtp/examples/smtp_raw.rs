@@ -1,10 +1,12 @@
 use base64::{engine::general_purpose, Engine as _};
 use mailsis_utils::generate_random_bytes;
-use std::{env::args, error::Error, path::Path};
+use rustls::{ClientConfig, RootCertStore, ServerName};
+use std::{env::args, error::Error, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
+use tokio_rustls::{TlsConnector, TlsStream};
 use uuid::Uuid;
 
 /// Size of the random file in bytes
@@ -34,6 +36,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while response.starts_with("250-") {
         read_response(&mut reader, &mut response).await?;
     }
+
+    // Upgrade to TLS
+    let tls_stream = upgrade_to_tls(stream, "localhost").await?;
+    let (reader_ssl, mut writer_ssl) = tls_stream.split();
+    let (reader, mut writer) = (BufReader::new(reader_ssl), writer_ssl);
+    let mut reader_ssl = BufReader::new(reader_ssl);
 
     // Send MAIL FROM command
     write_command(&mut writer, "MAIL FROM:<sender@example.com>").await?;
@@ -128,4 +136,23 @@ async fn read_response<R: AsyncBufRead + Unpin>(
     reader.read_line(response).await?;
     println!("Server: {}", response.trim());
     Ok(())
+}
+
+async fn upgrade_to_tls(
+    plain_stream: TcpStream,
+    domain: &str,
+) -> Result<TlsStream<TcpStream>, Box<dyn std::error::Error>> {
+    let root_store = RootCertStore::empty();
+
+    let config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    let connector = TlsConnector::from(Arc::new(config));
+    let server_name = ServerName::try_from(domain)?;
+
+    let tls_stream = TlsStream::Client(connector.connect(server_name, plain_stream).await?);
+
+    Ok(tls_stream)
 }
