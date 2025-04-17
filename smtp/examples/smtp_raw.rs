@@ -38,10 +38,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Upgrade to TLS
+    write_command(&mut writer, "STARTTLS").await?;
+    read_response(&mut reader, &mut response).await?;
+
     let tls_stream = upgrade_to_tls(stream, "localhost").await?;
-    let (reader_ssl, mut writer_ssl) = tls_stream.split();
-    let (reader, mut writer) = (BufReader::new(reader_ssl), writer_ssl);
-    let mut reader_ssl = BufReader::new(reader_ssl);
+    let (reader_ssl, writer_ssl) = tokio::io::split(tls_stream);
+    let mut reader = BufReader::new(reader_ssl);
+    let mut writer = writer_ssl;
 
     // Send MAIL FROM command
     write_command(&mut writer, "MAIL FROM:<sender@example.com>").await?;

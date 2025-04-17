@@ -1,12 +1,9 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use rustls::server::ServerSessionMemoryCache;
-use rustls_pemfile::{certs, pkcs8_private_keys};
+use mailsis_utils::load_tls_config;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
-    fs::File as StdFile,
-    io::BufReader as StdBufReader,
     str::SplitWhitespace,
     sync::Arc,
 };
@@ -19,10 +16,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
 };
-use tokio_rustls::{
-    rustls::{Certificate, PrivateKey, ServerConfig},
-    TlsAcceptor, TlsStream,
-};
+use tokio_rustls::{TlsAcceptor, TlsStream};
 use uuid::Uuid;
 
 struct SMTPSession {
@@ -82,7 +76,7 @@ async fn is_mime_valid(body: &str) -> bool {
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:2525").await?;
-    let tls_config = Arc::new(load_tls_config().unwrap());
+    let tls_config = Arc::new(load_tls_config("cert.pem", "key.pem").unwrap());
     let tls_acceptor = TlsAcceptor::from(tls_config);
     let credentials = Arc::new(load_credentials("users.txt"));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
@@ -110,36 +104,6 @@ async fn main() -> std::io::Result<()> {
             handle_smtp_session(stream, tls_acceptor, tx, credentials).await;
         });
     }
-}
-
-/// Loads the TLS configuration from the files and returns a ServerConfig.
-///
-/// The files should be structured as follows:
-/// cert.pem: The certificate file.
-/// key.pem: The private key file.
-fn load_tls_config() -> Result<ServerConfig, Box<dyn Error>> {
-    let cert_file = &mut StdBufReader::new(StdFile::open("cert.pem")?);
-    let key_file = &mut StdBufReader::new(StdFile::open("key.pem")?);
-
-    let cert_chain = certs(cert_file)
-        .unwrap()
-        .into_iter()
-        .map(Certificate)
-        .collect();
-
-    // Load the private key from the key file as PKCS8
-    let mut keys = pkcs8_private_keys(key_file)?;
-    let key = PrivateKey(keys.remove(0));
-
-    let mut config = ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(cert_chain, key)?;
-
-    // Allow multiple sessions per client, making it possible to
-    // re-use the same TLS connection for multiple SMTP sessions
-    config.session_storage = ServerSessionMemoryCache::new(256);
-    Ok(config)
 }
 
 /// Loads the credentials from the file and returns a HashMap of usernames and passwords.
