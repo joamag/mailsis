@@ -266,8 +266,9 @@ impl SMTPSession {
         self.write_response(writer, 354, "End data with <CR><LF>.<CR><LF>")
             .await;
 
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 4096];
         let mut buffer_all = Vec::<u8>::new();
+        let mut last_bytes = Vec::<u8>::with_capacity(5);
 
         loop {
             match reader.read(&mut buffer).await {
@@ -275,8 +276,15 @@ impl SMTPSession {
                 Ok(n) => {
                     let chunk = &buffer[..n];
                     buffer_all.extend_from_slice(chunk);
-                    if chunk.ends_with(b".\r\n") {
-                        buffer_all.truncate(buffer_all.len() - 3);
+
+                    // Add new bytes to sliding window, and then check if the last
+                    // 5 bytes are the pre-agreed termination sequence
+                    last_bytes.extend_from_slice(chunk);
+                    if last_bytes.len() > 5 {
+                        last_bytes.drain(0..last_bytes.len() - 5);
+                    }
+                    if last_bytes.ends_with(b"\r\n.\r\n") {
+                        buffer_all.truncate(buffer_all.len() - 5);
                         break;
                     }
                 }
@@ -394,8 +402,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).unwrap(),
     );
 
-    let listening = format!("{}:{}", HOST, PORT);
+    let host = std::env::var("HOST").unwrap_or_else(|_| HOST.to_string());
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| PORT.to_string())
+        .parse()
+        .unwrap();
+    let listening = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&listening).await?;
+
     let tls_acceptor = TlsAcceptor::from(tls_config);
     let credentials = Arc::new(load_credentials("users.txt"));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);

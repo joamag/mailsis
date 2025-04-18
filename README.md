@@ -2,6 +2,8 @@
 
 Simple (yet efficient) [SMTP](https://datatracker.ietf.org/doc/html/rfc5321) and [IMAP](https://datatracker.ietf.org/doc/html/rfc3501) server.
 
+**Mailsis has been written for educational purposes and shouldn't be taken too seriously.** Use it at your own risk!
+
 ## Description
 
 Built on top of the powerful [Rust Programming Language](https://www.rust-lang.org/), Mailsis provides a safe and efficient implementation of the classic SMTP and IMAP protocols.

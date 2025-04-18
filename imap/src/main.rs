@@ -402,7 +402,12 @@ impl IMAPSession {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let listening = format!("{}:{}", HOST, PORT);
+    let host = std::env::var("HOST").unwrap_or_else(|_| HOST.to_string());
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| PORT.to_string())
+        .parse()
+        .unwrap();
+    let listening = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&listening).await?;
 
     println!("Mailsis-IMAP running on {}", &listening);
