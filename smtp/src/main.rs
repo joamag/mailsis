@@ -267,15 +267,17 @@ impl SMTPSession {
             .await;
 
         let mut buffer = [0u8; 4096];
-        let mut buffer_all = Vec::<u8>::new();
+        let mut buffer_data = Vec::<u8>::new();
         let mut last_bytes = Vec::<u8>::with_capacity(5);
 
         loop {
             match reader.read(&mut buffer).await {
                 Ok(0) => break,
                 Ok(n) => {
+                    // Read the chunk of data from the reader and append it 
+                    // to the `buffer_data` vector
                     let chunk = &buffer[..n];
-                    buffer_all.extend_from_slice(chunk);
+                    buffer_data.extend_from_slice(chunk);
 
                     // Add new bytes to sliding window, and then check if the last
                     // 5 bytes are the pre-agreed termination sequence
@@ -284,7 +286,7 @@ impl SMTPSession {
                         last_bytes.drain(0..last_bytes.len() - 5);
                     }
                     if last_bytes.ends_with(b"\r\n.\r\n") {
-                        buffer_all.truncate(buffer_all.len() - 5);
+                        buffer_data.truncate(buffer_data.len() - 5);
                         break;
                     }
                 }
@@ -292,7 +294,7 @@ impl SMTPSession {
             }
         }
 
-        let data = String::from_utf8_lossy(&buffer_all).into_owned();
+        let data = String::from_utf8_lossy(&buffer_data).into_owned();
 
         let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
         self.write_response(writer, 250, "Message accepted").await;
