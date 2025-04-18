@@ -2,6 +2,7 @@ FROM rust:latest as builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
+    cmake \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
