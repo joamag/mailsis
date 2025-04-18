@@ -10,8 +10,14 @@ jobs:
     strategy:
       matrix:
         rust-version: [
+          "1.80.0",
+          "1.81.0",
+          "1.82.0",
+          "1.83.0",
+          "1.84.0",
+          "1.85.0",
+          "1.86.0",
           "latest",
-          "nightly"
         ]
     runs-on: ubuntu-latest
     container: rust:${{ matrix.rust-version }}
