@@ -2,8 +2,10 @@ FROM rust:latest as builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
-    cmake \
     pkg-config \
+    cmake \
+    clang \
+    libclang-dev \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
