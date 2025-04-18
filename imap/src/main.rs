@@ -1,7 +1,7 @@
 use mailsis_utils::{get_crate_root, uid_fetch_range_str};
 use std::{error::Error, path::PathBuf, str::FromStr};
 use tokio::{
-    fs::{read_dir, read_to_string},
+    fs::{create_dir_all, read_dir, read_to_string},
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
@@ -42,6 +42,7 @@ impl IMAPSession {
             "SEARCH" => self.handle_search(writer, tag, parts).await,
             "FETCH" => self.handle_fetch(writer, tag, parts).await,
             "STATUS" => self.handle_status(writer, tag, parts).await,
+            "CREATE" => self.handle_create(writer, tag, parts).await,
             "UID" => self.handle_uid(writer, tag, parts).await,
             "CAPABILITY" => self.handle_capability(writer, tag).await,
             "NOOP" => self.handle_noop(writer, tag).await,
@@ -216,6 +217,25 @@ impl IMAPSession {
         Ok(())
     }
 
+    async fn handle_create<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+        tag: &str,
+        parts: &[&str],
+    ) -> Result<(), Box<dyn Error>> {
+        if parts.len() >= 2 {
+            let mailbox = parts[2].trim_matches('"').to_string();
+            let path = self.mailbox_path().join(format!("{}.mbox", mailbox));
+            create_dir_all(path).await?;
+            self.write_response(writer, tag, "OK", "CREATE completed")
+                .await?;
+        } else {
+            self.write_response(writer, tag, "BAD", "Invalid mailbox name")
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn handle_uid<W: AsyncWrite + Unpin>(
         &mut self,
         writer: &mut W,
@@ -245,15 +265,19 @@ impl IMAPSession {
         parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
         let messages = self.search_messages("").await?;
+
+        // Obtain the range of UIDs that are meant to be fetched, converting
+        // the string based IMAP range into a rust one
         let range = uid_fetch_range_str(&parts[3].to_string(), messages.len() as u32)
             .ok_or("Invalid range")?;
         let (start, end) = ((*range.start() - 1) as usize, (*range.end() - 1) as usize);
         let messages_range = messages[start..=end].to_vec();
 
+        // Save the message indices in a hashmap for faster lookup
         let message_indices: std::collections::HashMap<_, _> = messages
             .iter()
             .enumerate()
-            .map(|(idx, msg)| (msg, start + idx))
+            .map(|(idx, msg)| (msg, idx))
             .collect();
 
         for message in messages_range {
