@@ -19,3 +19,10 @@ Built on top of the powerful [Rust Programming Language](https://www.rust-lang.o
 ## License
 
 Mailsis is currently licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/).
+
+## Build Automation
+
+[![Build Status](https://github.com/joamag/mailsis/workflows/Main%20Workflow/badge.svg)](https://github.com/joamag/mailsis/actions)
+[![crates Status](https://img.shields.io/crates/v/mailsis-smtp)](https://crates.io/crates/mailsis-smtp)
+[![crates Status](https://img.shields.io/crates/v/mailsis-imap)](https://crates.io/crates/mailsis-imap)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://www.apache.org/licenses/)
