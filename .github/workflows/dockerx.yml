@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { dockerfile: "Dockerfile", tag_name: "latest", arch: "linux/386,linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64/v8" }
+          - { dockerfile: "Dockerfile", tag_name: "latest", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

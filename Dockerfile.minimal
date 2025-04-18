@@ -1,26 +1,19 @@
-FROM rust:latest as builder
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+FROM rust:alpine as builder
+RUN apk add --no-cache musl-dev gcc pkgconf openssl openssl-dev musl-dev openssl-libs-static
 
 WORKDIR /app
 COPY . .
 
 RUN cargo build --all-targets --release
 
-FROM rust:slim
+FROM alpine:latest
 
 EXPOSE 2525 1430
 
 ENV HOST=0.0.0.0
 ENV PORT=2525
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache libc6-compat ca-certificates
 
 COPY --from=builder /app/target/release/mailsis-imap /usr/local/bin/mailsis-imap
 COPY --from=builder /app/target/release/mailsis-smtp /usr/local/bin/mailsis-smtp
