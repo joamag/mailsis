@@ -63,10 +63,10 @@ impl SMTPSession {
         writer: &mut W,
         tx: &mpsc::Sender<(String, HashSet<String>, String)>,
         line: &mut String,
-        command: &String,
+        command: &str,
         arg: Option<&str>,
     ) -> Result<(), Box<dyn Error>> {
-        match command.as_str() {
+        match command {
             "EHLO" | "HELO" => {
                 self.handle_ehlo_helo(writer).await?;
             }
@@ -320,10 +320,10 @@ impl SMTPSession {
         Ok(())
     }
 
-    async fn read_command<'a, R: AsyncRead + AsyncBufRead + Unpin>(
+    async fn read_command<R: AsyncRead + AsyncBufRead + Unpin>(
         &mut self,
         reader: &mut R,
-        line: &'a mut String,
+        line: &mut String,
     ) -> (String, String, Option<String>) {
         line.clear();
 

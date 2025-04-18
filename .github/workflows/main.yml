@@ -33,7 +33,7 @@ jobs:
       - name: Verify Rust code format
         run: cargo fmt --all -- --check
       - name: Verify Rust code linting
-        run: cargo clippy -- -D warnings -A unknown-lints --all-targets
+        run: cargo clippy --all-targets -- -D warnings -A unknown-lints
       - name: Run unit tests
         run: cargo test
       - name: Build development version
