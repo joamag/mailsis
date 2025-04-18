@@ -16,7 +16,6 @@ struct IMAPSession {
     mailbox: Option<String>,
 }
 
-
 impl IMAPSession {
     async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
         &mut self,
@@ -260,8 +259,7 @@ impl IMAPSession {
 
         // Obtain the range of UIDs that are meant to be fetched, converting
         // the string based IMAP range into a rust one
-        let range = uid_fetch_range_str(parts[3], messages.len() as u32)
-            .ok_or("Invalid range")?;
+        let range = uid_fetch_range_str(parts[3], messages.len() as u32).ok_or("Invalid range")?;
         let (start, end) = ((*range.start() - 1) as usize, (*range.end() - 1) as usize);
         let messages_range = messages[start..=end].to_vec();
 
