@@ -29,6 +29,15 @@ pub async fn is_mime_valid(body: &str) -> bool {
 /// let headers = mailsis_utils::parse_mime_headers("From: test@example.com\r\nTo: test@example.com\r\n").unwrap();
 /// assert_eq!(headers, expected);
 /// ```
+/// 
+/// ```rust
+/// let expected = [("From", "test@example.com"), ("To", "test@example.com")]
+///     .into_iter()
+///     .map(|(k, v)| (k.to_string(), v.to_string()))
+///     .collect::<std::collections::HashMap<_, _>>();
+/// let headers = mailsis_utils::parse_mime_headers("From: test@example.com\r\nTo: test@example.com\r\n\r\nBody of the email").unwrap();
+/// assert_eq!(headers, expected);
+/// ```
 pub fn parse_mime_headers(body: &str) -> Result<HashMap<String, String>, Box<dyn Error>> {
     let mut headers = HashMap::new();
     for line in body.lines() {
