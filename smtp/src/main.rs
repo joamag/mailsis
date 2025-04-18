@@ -376,6 +376,13 @@ impl SMTPSession {
     }
 }
 
+/// Main function for the SMTP server.
+///
+/// It will listen for incoming connections on the specified port and handle them
+/// using the [`handle_smtp_session`] function.
+///
+/// It will also spawn a task to handle the email storage, this is a long running
+/// task that will run until the program is terminated.
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> Result<(), Box<dyn Error>> {
     let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
@@ -547,6 +554,7 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
 }
 
 /// Stores the email in the mailbox directory, creates the directory if it doesn't exist.
+///
 /// Each user has their own directory, and each email is stored in a file named with a UUID.
 ///
 /// There's no limit to the number of emails that can be stored.
