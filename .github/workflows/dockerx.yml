@@ -1,0 +1,52 @@
+name: DockerX Workflow
+on:
+  push:
+    tags:
+      - "*"
+    branches-ignore:
+      - none
+  workflow_dispatch:
+jobs:
+  build:
+    name: Build
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { dockerfile: "Dockerfile", tag_name: "latest", arch: "linux/386,linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64/v8" }
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set tag name based on branch
+        id: set_tag
+        run: |
+          if [[ "${{ github.ref_name }}" == "master" ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            ref_name=${{ github.ref_name }}
+            BRANCH_NAME=${ref_name//\//_}
+            echo "tag=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          fi
+      - name: Configure Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.config.dockerfile }}
+          platforms: ${{ matrix.config.arch }}
+          push: true
+          tags: joamag/mailsis:${{ steps.set_tag.outputs.tag }}
