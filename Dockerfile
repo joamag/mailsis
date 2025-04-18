@@ -14,7 +14,7 @@ COPY . .
 
 RUN cargo build --all-targets --release
 
-FROM rust:slim
+FROM debian:bookworm-slim
 
 EXPOSE 2525 1430
 
