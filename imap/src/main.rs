@@ -275,10 +275,10 @@ impl IMAPSession {
             let contents = self.fetch_message(&message).await.unwrap();
             let slices = parts[4..parts.len()]
                 .iter()
-                .map(|p| {
-                    let c = p.to_string();
-                    let a = c.trim_matches('(').trim_matches(')');
-                    match a {
+                .map(|s| {
+                    let s = s.to_string();
+                    let s = s.trim_matches('(').trim_matches(')');
+                    match s {
                         "FLAGS" => "FLAGS (\\Unseen)".to_string(),
                         "RFC822.SIZE" => format!("RFC822.SIZE {}", message.len()),
                         "BODY.PEEK[HEADER.FIELDS" => {
