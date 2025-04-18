@@ -36,7 +36,7 @@ pub fn uid_fetch_range_str(input: &str, max_uid: u32) -> Option<RangeInclusive<u
         (input, None)
     };
 
-    return uid_fetch_range(start_str, end_str_opt, max_uid);
+    uid_fetch_range(start_str, end_str_opt, max_uid)
 }
 
 pub fn uid_fetch_range(
