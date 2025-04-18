@@ -8,7 +8,7 @@ use rustls::{
 };
 use rustls_pemfile::certs;
 
-use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
+use std::{error::Error, fs::File, io::BufReader, path::PathBuf, str::FromStr};
 
 use crate::get_crate_root;
 
@@ -79,12 +79,15 @@ fn load_chain_and_key(
     Ok((cert_chain, key))
 }
 
+/// Returns the default path to the CA certificate file
+/// used by the Mailsis infrastructure.
 pub fn ca_cert_path() -> Result<PathBuf, Box<dyn Error>> {
-    let crate_root = get_crate_root()?;
+    let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".")?);
     let ca_path = crate_root.join("certs").join("ca.cert.pem");
     Ok(ca_path)
 }
 
+/// Loads the CA certificate from the default path.
 pub fn load_default_ca_cert() -> Result<Vec<CertificateDer<'static>>, Box<dyn Error>> {
     let cert_chain = load_ca_cert(
         ca_cert_path()?
@@ -94,6 +97,7 @@ pub fn load_default_ca_cert() -> Result<Vec<CertificateDer<'static>>, Box<dyn Er
     Ok(cert_chain)
 }
 
+/// Loads the CA certificate from the given path.
 fn load_ca_cert(cert_path: &str) -> Result<Vec<CertificateDer<'static>>, Box<dyn Error>> {
     let cert_file = &mut BufReader::new(File::open(cert_path)?);
     let cert_chain = certs(cert_file)?
