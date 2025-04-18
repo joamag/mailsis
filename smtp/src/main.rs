@@ -274,7 +274,7 @@ impl SMTPSession {
             match reader.read(&mut buffer).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Read the chunk of data from the reader and append it 
+                    // Read the chunk of data from the reader and append it
                     // to the `buffer_data` vector
                     let chunk = &buffer[..n];
                     buffer_data.extend_from_slice(chunk);
