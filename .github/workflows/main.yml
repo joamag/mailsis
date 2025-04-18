@@ -1,0 +1,36 @@
+name: Main Workflow
+on:
+  push:
+  schedule:
+    - cron: "0 0 * * 0"
+jobs:
+  build:
+    name: Build
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        rust-version: [
+          "latest",
+          "nightly"
+        ]
+    runs-on: ubuntu-latest
+    container: rust:${{ matrix.rust-version }}
+    steps:
+      - name: Checkout code from repository
+        uses: actions/checkout@v4
+      - name: Install Rust components
+        run: |
+          rustup component add rustfmt
+          rustup component add clippy
+      - name: Print Rust information
+        run: rustc --version
+      - name: Verify Rust code format
+        run: cargo fmt --all -- --check
+      - name: Verify Rust code linting
+        run: cargo clippy -- -D warnings -A unknown-lints --all-targets
+      - name: Run unit tests
+        run: cargo test
+      - name: Build development version
+        run: cargo build --all-targets
+      - name: Build release version
+        run: cargo build --release --all-targets
