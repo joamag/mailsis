@@ -413,9 +413,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let tx = tx.clone();
         let credentials = credentials.clone();
         tokio::spawn(async move {
-            handle_smtp_session(stream, tls_acceptor, tx, credentials)
-                .await
-                .unwrap();
+            if let Err(e) = handle_smtp_session(stream, tls_acceptor, tx, credentials).await {
+                eprintln!("Error: {e}");
+            }
         });
     }
 }
