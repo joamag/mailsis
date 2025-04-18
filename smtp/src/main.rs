@@ -333,12 +333,9 @@ impl SMTPSession {
 
         let mut parts: SplitWhitespace<'_> = line.split_whitespace();
         let command = parts.next().unwrap_or("").trim_end().to_uppercase();
-        let argument = match parts.next() {
-            Some(arg) => Some(arg.trim_end().to_string()),
-            None => None,
-        };
+        let argument = parts.next().map(|arg| arg.trim_end().to_string());
 
-        return (line_clone, command, argument);
+        (line_clone, command, argument)
     }
 
     async fn write_inner<W: AsyncWrite + Unpin>(
@@ -476,7 +473,7 @@ async fn handle_stream(
 
     loop {
         let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
-        if line == "" {
+        if line.is_empty() {
             break;
         }
 
@@ -528,7 +525,7 @@ async fn handle_tls_stream(
 
     loop {
         let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
-        if line == "" {
+        if line.is_empty() {
             break;
         }
 
