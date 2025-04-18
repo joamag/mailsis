@@ -9,21 +9,13 @@ use tokio::{
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 1430;
 
+#[derive(Default)]
 struct IMAPSession {
     authenticated: bool,
     username: Option<String>,
     mailbox: Option<String>,
 }
 
-impl Default for IMAPSession {
-    fn default() -> Self {
-        Self {
-            authenticated: false,
-            username: None,
-            mailbox: None,
-        }
-    }
-}
 
 impl IMAPSession {
     async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
@@ -268,7 +260,7 @@ impl IMAPSession {
 
         // Obtain the range of UIDs that are meant to be fetched, converting
         // the string based IMAP range into a rust one
-        let range = uid_fetch_range_str(&parts[3].to_string(), messages.len() as u32)
+        let range = uid_fetch_range_str(parts[3], messages.len() as u32)
             .ok_or("Invalid range")?;
         let (start, end) = ((*range.start() - 1) as usize, (*range.end() - 1) as usize);
         let messages_range = messages[start..=end].to_vec();
@@ -289,17 +281,17 @@ impl IMAPSession {
                     let c = p.to_string();
                     let a = c.trim_matches('(').trim_matches(')');
                     match a {
-                        "FLAGS" => return "FLAGS (\\Unseen)".to_string(),
-                        "RFC822.SIZE" => return format!("RFC822.SIZE {}", message.len()),
+                        "FLAGS" => "FLAGS (\\Unseen)".to_string(),
+                        "RFC822.SIZE" => format!("RFC822.SIZE {}", message.len()),
                         "BODY.PEEK[HEADER.FIELDS" => {
-                            return format!(
+                            format!(
                                 "BODY[HEADER.FIELDS (To From Subject)] {{{}}}\r\n{}",
                                 contents.len(),
                                 contents
                             )
                         }
                         "BODY[]" => {
-                            return format!("BODY[] {{{}}}\r\n{}", contents.len(), contents)
+                            format!("BODY[] {{{}}}\r\n{}", contents.len(), contents)
                         }
                         _ => "".to_string(),
                     }
