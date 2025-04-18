@@ -204,6 +204,7 @@ impl SMTPSession {
                 .await;
         }
         if let Some(value) = value.strip_prefix("FROM:") {
+            // Sanitize the from address, removing the prefix and suffix <>
             self.from = value
                 .trim()
                 .strip_prefix("<")
