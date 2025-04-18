@@ -29,7 +29,7 @@ pub async fn is_mime_valid(body: &str) -> bool {
 /// let headers = mailsis_utils::parse_mime_headers("From: test@example.com\r\nTo: test@example.com\r\n").unwrap();
 /// assert_eq!(headers, expected);
 /// ```
-/// 
+///
 /// ```rust
 /// let expected = [("From", "test@example.com"), ("To", "test@example.com")]
 ///     .into_iter()
