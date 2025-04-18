@@ -20,7 +20,7 @@ struct IMAPSession {
 impl IMAPSession {
     async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
         &mut self,
-        reader: &mut R,
+        _reader: &mut R,
         writer: &mut W,
         tag: &str,
         command: &str,
@@ -337,7 +337,7 @@ impl IMAPSession {
         Ok(())
     }
 
-    async fn search_messages(&self, criteria: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    async fn search_messages(&self, _criteria: &str) -> Result<Vec<String>, Box<dyn Error>> {
         let mut messages = Vec::new();
         let mut entries = read_dir(&self.mailbox_path()).await?;
 
