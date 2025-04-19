@@ -23,6 +23,12 @@ use uuid::Uuid;
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 2525;
 
+/// Represents a single SMTP session, created for each incoming connection.
+/// 
+/// This struct is used to store the state of the SMTP session, including the
+/// from address, the recipients, whether the session is authenticated, whether
+/// TLS is required, and the credentials.
+#[derive(Debug, Default)]
 struct SMTPSession {
     from: String,
     rcpts: HashSet<String>,
@@ -30,19 +36,6 @@ struct SMTPSession {
     auth_required: bool,
     starttls: bool,
     credentials: Arc<HashMap<String, String>>,
-}
-
-impl Default for SMTPSession {
-    fn default() -> Self {
-        Self {
-            from: String::new(),
-            rcpts: HashSet::new(),
-            authenticated: false,
-            auth_required: false,
-            starttls: false,
-            credentials: Arc::new(HashMap::new()),
-        }
-    }
 }
 
 impl SMTPSession {
