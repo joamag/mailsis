@@ -192,10 +192,12 @@ impl SMTPSession {
         writer: &mut W,
         value: &str,
     ) -> Result<(), Box<dyn Error>> {
+        // Ensure that the user is authenticated before sending the mail
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
                 .await;
         }
+
         if let Some(value) = value.strip_prefix("FROM:") {
             // Sanitize the from address, removing the prefix and suffix <>
             self.from = value
@@ -217,11 +219,13 @@ impl SMTPSession {
         writer: &mut W,
         value: &str,
     ) -> Result<(), Box<dyn Error>> {
+        // Ensure that the user is authenticated before sending the mail
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
                 .await;
             return Ok(());
         }
+
         if let Some(value) = value.strip_prefix("TO:") {
             self.rcpts.insert(
                 value
