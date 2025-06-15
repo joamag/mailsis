@@ -15,9 +15,12 @@ pub async fn is_mime_valid(body: &str) -> bool {
     false
 }
 
-/// Parses the headers of a MIME email.
+/// Parses the headers of a MIME email, returning a hashmap of the headers.
 ///
-/// Returns a hashmap of the headers.
+/// The parsing is done by splitting the body on the first empty line, and
+/// splitting each line on the colon, separating the key and value.
+///
+/// Aligned with the RFC 2045, the headers are case-insensitive.
 ///
 /// # Examples
 ///
