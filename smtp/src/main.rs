@@ -1,8 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use mailsis_utils::{
-    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, store_metadata,
-    EmailMetadata,
+    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, EmailMetadata,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -589,8 +588,7 @@ async fn store_email(
     if !is_mime_valid(&body).await {
         file.write_all(format!("From: {from}\r\n").as_bytes())
             .await?;
-        file.write_all(format!("To: {rcpt}\r\n").as_bytes())
-            .await?;
+        file.write_all(format!("To: {rcpt}\r\n").as_bytes()).await?;
         file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
             .await?;
     }
@@ -602,15 +600,9 @@ async fn store_email(
     if store_meta {
         let headers = parse_mime_headers(&body).unwrap_or_default();
         let subject = headers.get("Subject").cloned().unwrap_or_default();
-        let metadata = EmailMetadata {
-            message_id,
-            sender: from,
-            recipient: rcpt,
-            subject,
-            path: file_path.clone(),
-        };
+        let metadata = EmailMetadata::new(message_id, from, rcpt, subject, file_path.clone());
         let db_path = crate_root.join("mailbox").join("metadata.db");
-        store_metadata(db_path, &metadata).await?;
+        metadata.store_sqlite(db_path).await?;
     }
     Ok(())
 }
