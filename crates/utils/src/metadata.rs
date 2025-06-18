@@ -5,7 +5,7 @@ use rusqlite::{params, Connection};
 
 #[derive(Clone)]
 pub struct EmailMetadata {
-    pub id: String,
+    pub message_id: String,
     pub sender: String,
     pub recipient: String,
     pub subject: String,
@@ -26,7 +26,7 @@ pub async fn store_metadata(
         )?;
         conn.execute(
             "INSERT INTO metadata (id, sender, recipient, subject, path) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![meta.id, meta.sender, meta.recipient, meta.subject, meta.path.to_string_lossy()],
+            params![meta.message_id, meta.sender, meta.recipient, meta.subject, meta.path.to_string_lossy()],
         )?;
         Ok(())
     })

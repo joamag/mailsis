@@ -42,7 +42,7 @@ impl IMAPSession {
                     writer,
                     tag,
                     "BAD",
-                    format!("Unknown command ({})", command).as_str(),
+                    format!("Unknown command ({command})").as_str(),
                 )
                 .await
             }
@@ -216,7 +216,7 @@ impl IMAPSession {
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 2 {
             let mailbox = parts[2].trim_matches('"').to_string();
-            let path = self.mailbox_path().join(format!("{}.mbox", mailbox));
+            let path = self.mailbox_path().join(format!("{mailbox}.mbox"));
             create_dir_all(path).await?;
             self.write_response(writer, tag, "OK", "CREATE completed")
                 .await?;
@@ -241,7 +241,7 @@ impl IMAPSession {
                     writer,
                     tag,
                     "BAD",
-                    &format!("Invalid UID command {}", uid_command),
+                    &format!("Invalid UID command {uid_command}"),
                 )
                 .await?;
             }
@@ -352,7 +352,7 @@ impl IMAPSession {
     }
 
     async fn fetch_message(&self, message_id: &str) -> Result<String, Box<dyn Error>> {
-        let path = self.mailbox_path().join(format!("{}.eml", message_id));
+        let path = self.mailbox_path().join(format!("{message_id}.eml"));
         let content = read_to_string(path).await?;
         Ok(content)
     }
@@ -370,7 +370,7 @@ impl IMAPSession {
         message: &str,
     ) {
         writer
-            .write_all(format!("{} {} {}\r\n", tag, result, message).as_bytes())
+            .write_all(format!("{tag} {result} {message}\r\n").as_bytes())
             .await
             .ok();
     }
@@ -382,7 +382,7 @@ impl IMAPSession {
         result: &str,
         message: &str,
     ) -> Result<(), Box<dyn Error>> {
-        println!(">> {} {} {}", tag, result, message);
+        println!(">> {tag} {result} {message}");
         self.write_inner(w, tag, result, message).await;
         Ok(())
     }
@@ -407,7 +407,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| PORT.to_string())
         .parse()
         .unwrap();
-    let listening = format!("{}:{}", host, port);
+    let listening = format!("{host}:{port}");
     let listener = TcpListener::bind(&listening).await?;
 
     println!("Mailsis-IMAP running on {}", &listening);
