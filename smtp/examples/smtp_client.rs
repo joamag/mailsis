@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let start_time = Instant::now();
 
     // Generate random file
-    println!("Generating random file of {} MB...", FILE_SIZE_MB);
+    println!("Generating random file of {FILE_SIZE_MB} MB...");
     let file_path = "random_data.bin";
     generate_random_file(file_path, FILE_SIZE_MB).await?;
     println!("File generated in {:?}", start_time.elapsed());
@@ -59,8 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     lettre::message::SinglePart::builder()
                         .header(header::ContentType::TEXT_PLAIN)
                         .body(format!(
-                            "This is a test email with a {} MB file attachment.",
-                            FILE_SIZE_MB
+                            "This is a test email with a {FILE_SIZE_MB} MB file attachment."
                         )),
                 )
                 .singlepart(

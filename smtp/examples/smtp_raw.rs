@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (file_data, filename) = if args().len() > 1 {
         let path = args().nth(1).unwrap();
-        println!("Reading file from {}", path);
+        println!("Reading file from {path}");
         let filename = Path::new(&path)
             .file_name()
             .unwrap_or_default()
@@ -84,20 +84,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                   From: sender@localhost\r\n\
                   To: recipient@localhost\r\n\
                   Subject: Test Email with Large Attachment\r\n\
-                  Content-Type: multipart/mixed; boundary=\"{}\"\r\n\
+                  Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\
                   \r\n\
                   \r\n\
-                  --{}\r\n\
+                  --{boundary}\r\n\
                   Content-Type: text/plain\r\n\
                   \r\n\
                   This is a test email with a large attachment.\r\n\
                   \r\n\
-                  --{}\r\n\
+                  --{boundary}\r\n\
                   Content-Type: application/octet-stream\r\n\
                   Content-Transfer-Encoding: base64\r\n\
-                  Content-Disposition: attachment; filename=\"{}\"\r\n\
-                  \r\n",
-            boundary, boundary, boundary, filename
+                  Content-Disposition: attachment; filename=\"{filename}\"\r\n\
+                  \r\n"
         ),
     )
     .await?;
@@ -111,7 +110,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Data sent in {:?}", send_start.elapsed());
 
     // Send the final boundary and end of message
-    write_data(&mut writer, &format!("\r\n--{}--\r\n.\r\n", boundary)).await?;
+    write_data(&mut writer, &format!("\r\n--{boundary}--\r\n.\r\n")).await?;
     read_response(&mut reader, &mut response).await?;
 
     // Send QUIT command
@@ -125,9 +124,9 @@ async fn write_command<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &str,
 ) -> Result<(), Box<dyn Error>> {
-    println!(">> {}", message);
+    println!(">> {message}");
     writer
-        .write_all(format!("{}\r\n", message).as_bytes())
+        .write_all(format!("{message}\r\n").as_bytes())
         .await?;
     Ok(())
 }

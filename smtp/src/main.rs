@@ -1,6 +1,8 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use mailsis_utils::{get_crate_root, is_mime_valid, load_tls_server_config};
+use mailsis_utils::{
+    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, EmailMetadata,
+};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -352,7 +354,7 @@ impl SMTPSession {
             message
         );
         writer
-            .write_all(format!("{}{}{}\r\n", code, separator, message).as_bytes())
+            .write_all(format!("{code}{separator}{message}\r\n").as_bytes())
             .await
             .ok();
     }
@@ -403,7 +405,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| PORT.to_string())
         .parse()
         .unwrap();
-    let listening = format!("{}:{}", host, port);
+    let listening = format!("{host}:{port}");
     let listener = TcpListener::bind(&listening).await?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config);
@@ -415,8 +417,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in rcpts {
-                if let Err(error) = store_email(from.clone(), rcpt, body.clone()).await {
-                    println!("Error storing email: {}", error);
+                if let Err(error) = store_email(from.clone(), rcpt, body.clone(), true).await {
+                    println!("Error storing email: {error}");
                 }
             }
         }
@@ -491,7 +493,7 @@ async fn handle_stream(
                         return handle_tls_stream(TlsStream::Server(tls_stream), tx, session).await;
                     }
                     Err(e) => {
-                        eprintln!("TLS handshake failed: {:?}", e);
+                        eprintln!("TLS handshake failed: {e:?}");
                         return Ok(());
                     }
                 }
@@ -568,24 +570,39 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
 /// Each user has their own directory, and each email is stored in a file named with a UUID.
 ///
 /// There's no limit to the number of emails that can be stored.
-async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box<dyn Error>> {
+async fn store_email(
+    from: String,
+    rcpt: String,
+    body: String,
+    store_meta: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
     let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
-    let path = crate_root.join("mailbox").join(safe_rcpt);
+    let path = crate_root.join("mailbox").join(&safe_rcpt);
     fs::create_dir_all(&path).await?;
-    let file_path = path.join(format!("{}.eml", Uuid::new_v4()));
+    let message_id = Uuid::new_v4().to_string();
+    let file_path = path.join(format!("{message_id}.eml"));
     let file_path_str = file_path.to_str().unwrap();
     let mut file = File::create(&file_path).await?;
-    println!("Started storing email to {}", file_path_str);
+    println!("Started storing email to {file_path_str}");
     if !is_mime_valid(&body).await {
-        file.write_all(format!("From: {}\r\n", from).as_bytes())
+        file.write_all(format!("From: {from}\r\n").as_bytes())
             .await?;
-        file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
-            .await?;
+        file.write_all(format!("To: {rcpt}\r\n").as_bytes()).await?;
         file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
             .await?;
     }
     file.write_all(body.as_bytes()).await?;
-    println!("Stored: {}", file_path_str);
+    println!("Stored: {file_path_str}");
+
+    // checks if the metadata should be stored, if so, it will
+    // parse the headers and store the metadata in the database
+    if store_meta {
+        let headers = parse_mime_headers(&body).unwrap_or_default();
+        let subject = headers.get("Subject").cloned().unwrap_or_default();
+        let metadata = EmailMetadata::new(message_id, from, rcpt, subject, file_path.clone());
+        let db_path = crate_root.join("mailbox").join("metadata.db");
+        metadata.store_sqlite(db_path).await?;
+    }
     Ok(())
 }
