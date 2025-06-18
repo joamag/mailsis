@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection};
 use tokio::task::spawn_blocking;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EmailMetadata {
     pub message_id: String,
     pub from: String,
@@ -37,20 +37,51 @@ impl EmailMetadata {
         let path = db.as_ref().to_path_buf();
         let metadata = self.clone();
 
+        // spawns a blocking task to store the metadata in the database
+        // this is done to avoid blocking the main thread
         spawn_blocking(move || -> Result<(), Box<dyn Error + Send + Sync>> {
             let conn = Connection::open(path)?;
             conn.execute(
-                "CREATE TABLE IF NOT EXISTS metadata (id TEXT PRIMARY KEY, sender TEXT, recipient TEXT, subject TEXT, path TEXT)",
+                "CREATE TABLE IF NOT EXISTS metadata (message_id TEXT PRIMARY KEY, _from TEXT, rcpt TEXT, subject TEXT, path TEXT)",
                 [],
             )?;
             conn.execute(
-                "INSERT INTO metadata (id, sender, recipient, subject, path) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO metadata (message_id, _from, rcpt, subject, path) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![metadata.message_id, metadata.from, metadata.rcpt, metadata.subject, metadata.path.to_string_lossy()],
             )?;
             Ok(())
         })
         .await??;
         Ok(())
+    }
+
+    pub async fn retrieve_sqlite(
+        db: impl AsRef<Path>,
+        message_id: String,
+    ) -> Result<EmailMetadata, Box<dyn Error + Send + Sync>> {
+        let path = db.as_ref().to_path_buf();
+
+        // spawns a blocking task to retrieve the metadata from the database
+        // this is done to avoid blocking the main thread
+        spawn_blocking(
+            move || -> Result<EmailMetadata, Box<dyn Error + Send + Sync>> {
+                let conn = Connection::open(path)?;
+                let mut stmt = conn.prepare(
+                    "SELECT message_id, _from, rcpt, subject, path FROM metadata WHERE message_id = ?",
+                )?;
+                let row = stmt.query_row(params![message_id], |row| {
+                    Ok(EmailMetadata {
+                        message_id: row.get(0)?,
+                        from: row.get(1)?,
+                        rcpt: row.get(2)?,
+                        subject: row.get(3)?,
+                        path: PathBuf::from(row.get::<_, String>(4)?),
+                    })
+                })?;
+                Ok(row)
+            },
+        )
+        .await?
     }
 }
 
@@ -122,7 +153,9 @@ mod tests {
 
         let conn = Connection::open(db_path).unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, sender, recipient, subject, path FROM metadata WHERE id = ?")
+            .prepare(
+                "SELECT message_id, _from, rcpt, subject, path FROM metadata WHERE message_id = ?",
+            )
             .unwrap();
 
         let row = stmt
@@ -236,7 +269,9 @@ mod tests {
 
         let conn = Connection::open(db_path).unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, sender, recipient, subject, path FROM metadata WHERE id = ?")
+            .prepare(
+                "SELECT message_id, _from, rcpt, subject, path FROM metadata WHERE message_id = ?",
+            )
             .unwrap();
         let row = stmt
             .query_row(params!["test-id-with-special-chars"], |row| {
@@ -272,6 +307,57 @@ mod tests {
         assert!(
             result.is_err(),
             "Should fail when trying to create database in nonexistent directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_sqlite_success() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path();
+
+        let original_metadata = EmailMetadata::new(
+            "retrieve-test-id".to_string(),
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Test Subject for Retrieval".to_string(),
+            PathBuf::from("/path/to/email.eml"),
+        );
+
+        // First store the metadata
+        let store_result = original_metadata.store_sqlite(db_path).await;
+        assert!(
+            store_result.is_ok(),
+            "Failed to store metadata: {:?}",
+            store_result
+        );
+
+        // Then retrieve it
+        let retrieved_metadata =
+            EmailMetadata::retrieve_sqlite(db_path, "retrieve-test-id".to_string()).await;
+        assert!(
+            retrieved_metadata.is_ok(),
+            "Failed to retrieve metadata: {:?}",
+            retrieved_metadata
+        );
+
+        let retrieved = retrieved_metadata.unwrap();
+        assert_eq!(retrieved.message_id, original_metadata.message_id);
+        assert_eq!(retrieved.from, original_metadata.from);
+        assert_eq!(retrieved.rcpt, original_metadata.rcpt);
+        assert_eq!(retrieved.subject, original_metadata.subject);
+        assert_eq!(retrieved.path, original_metadata.path);
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_sqlite_not_found() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path();
+
+        // Try to retrieve non-existent metadata
+        let result = EmailMetadata::retrieve_sqlite(db_path, "non-existent-id".to_string()).await;
+        assert!(
+            result.is_err(),
+            "Should fail when trying to retrieve non-existent metadata"
         );
     }
 }
