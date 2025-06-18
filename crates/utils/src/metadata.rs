@@ -53,3 +53,222 @@ impl EmailMetadata {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_email_metadata_new() {
+        let message_id = "test-message-id".to_string();
+        let from = "sender@example.com".to_string();
+        let rcpt = "recipient@example.com".to_string();
+        let subject = "Test Subject".to_string();
+        let path = PathBuf::from("/path/to/email.eml");
+
+        let metadata = EmailMetadata::new(
+            message_id.clone(),
+            from.clone(),
+            rcpt.clone(),
+            subject.clone(),
+            path.clone(),
+        );
+
+        assert_eq!(metadata.message_id, message_id);
+        assert_eq!(metadata.from, from);
+        assert_eq!(metadata.rcpt, rcpt);
+        assert_eq!(metadata.subject, subject);
+        assert_eq!(metadata.path, path);
+    }
+
+    #[test]
+    fn test_email_metadata_clone() {
+        let original = EmailMetadata::new(
+            "test-id".to_string(),
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Test Subject".to_string(),
+            PathBuf::from("/path/to/email.eml"),
+        );
+
+        let cloned = original.clone();
+
+        assert_eq!(original.message_id, cloned.message_id);
+        assert_eq!(original.from, cloned.from);
+        assert_eq!(original.rcpt, cloned.rcpt);
+        assert_eq!(original.subject, cloned.subject);
+        assert_eq!(original.path, cloned.path);
+    }
+
+    #[tokio::test]
+    async fn test_store_sqlite_success() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path();
+
+        let metadata = EmailMetadata::new(
+            "test-message-id".to_string(),
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Test Subject".to_string(),
+            PathBuf::from("/path/to/email.eml"),
+        );
+
+        let result = metadata.store_sqlite(db_path).await;
+        assert!(result.is_ok(), "Failed to store metadata: {:?}", result);
+
+        let conn = Connection::open(db_path).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, sender, recipient, subject, path FROM metadata WHERE id = ?")
+            .unwrap();
+
+        let row = stmt
+            .query_row(params!["test-message-id"], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .unwrap();
+
+        assert_eq!(row.0, "test-message-id");
+        assert_eq!(row.1, "sender@example.com");
+        assert_eq!(row.2, "recipient@example.com");
+        assert_eq!(row.3, "Test Subject");
+        assert_eq!(row.4, "/path/to/email.eml");
+    }
+
+    #[tokio::test]
+    async fn test_store_sqlite_duplicate_id() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path();
+
+        let metadata1 = EmailMetadata::new(
+            "duplicate-id".to_string(),
+            "sender1@example.com".to_string(),
+            "recipient1@example.com".to_string(),
+            "First Subject".to_string(),
+            PathBuf::from("/path/to/email1.eml"),
+        );
+
+        let metadata2 = EmailMetadata::new(
+            "duplicate-id".to_string(),
+            "sender2@example.com".to_string(),
+            "recipient2@example.com".to_string(),
+            "Second Subject".to_string(),
+            PathBuf::from("/path/to/email2.eml"),
+        );
+
+        let result1 = metadata1.store_sqlite(db_path).await;
+        assert!(
+            result1.is_ok(),
+            "First insert should succeed: {:?}",
+            result1
+        );
+
+        let result2 = metadata2.store_sqlite(db_path).await;
+        assert!(
+            result2.is_err(),
+            "Second insert should fail due to duplicate ID"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_store_sqlite_multiple_entries() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path();
+
+        let metadata1 = EmailMetadata::new(
+            "id-1".to_string(),
+            "sender1@example.com".to_string(),
+            "recipient1@example.com".to_string(),
+            "Subject 1".to_string(),
+            PathBuf::from("/path/to/email1.eml"),
+        );
+
+        let metadata2 = EmailMetadata::new(
+            "id-2".to_string(),
+            "sender2@example.com".to_string(),
+            "recipient2@example.com".to_string(),
+            "Subject 2".to_string(),
+            PathBuf::from("/path/to/email2.eml"),
+        );
+
+        let result1 = metadata1.store_sqlite(db_path).await;
+        assert!(result1.is_ok(), "First insert failed: {:?}", result1);
+
+        let result2 = metadata2.store_sqlite(db_path).await;
+        assert!(result2.is_ok(), "Second insert failed: {:?}", result2);
+
+        let conn = Connection::open(db_path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM metadata", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(count, 2, "Should have exactly 2 entries in the database");
+    }
+
+    #[tokio::test]
+    async fn test_store_sqlite_with_special_characters() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path();
+
+        let metadata = EmailMetadata::new(
+            "test-id-with-special-chars".to_string(),
+            "sender+tag@example.com".to_string(),
+            "recipient.name@domain.co.uk".to_string(),
+            "Subject with \"quotes\" and 'apostrophes'".to_string(),
+            PathBuf::from("/path/with spaces/email.eml"),
+        );
+
+        let result = metadata.store_sqlite(db_path).await;
+        assert!(
+            result.is_ok(),
+            "Failed to store metadata with special characters: {:?}",
+            result
+        );
+
+        let conn = Connection::open(db_path).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, sender, recipient, subject, path FROM metadata WHERE id = ?")
+            .unwrap();
+        let row = stmt
+            .query_row(params!["test-id-with-special-chars"], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .unwrap();
+
+        assert_eq!(row.0, "test-id-with-special-chars");
+        assert_eq!(row.1, "sender+tag@example.com");
+        assert_eq!(row.2, "recipient.name@domain.co.uk");
+        assert_eq!(row.3, "Subject with \"quotes\" and 'apostrophes'");
+        assert_eq!(row.4, "/path/with spaces/email.eml");
+    }
+
+    #[tokio::test]
+    async fn test_store_sqlite_invalid_path() {
+        let metadata = EmailMetadata::new(
+            "test-id".to_string(),
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Test Subject".to_string(),
+            PathBuf::from("/path/to/email.eml"),
+        );
+        let invalid_path = PathBuf::from("/nonexistent/directory/database.db");
+        let result = metadata.store_sqlite(&invalid_path).await;
+
+        assert!(
+            result.is_err(),
+            "Should fail when trying to create database in nonexistent directory"
+        );
+    }
+}
