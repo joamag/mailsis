@@ -1,6 +1,13 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use mailsis_utils::{get_crate_root, is_mime_valid, load_tls_server_config};
+use mailsis_utils::{
+    get_crate_root,
+    is_mime_valid,
+    load_tls_server_config,
+    parse_mime_headers,
+    store_metadata,
+    EmailMetadata,
+};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -568,24 +575,40 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
 /// Each user has their own directory, and each email is stored in a file named with a UUID.
 ///
 /// There's no limit to the number of emails that can be stored.
-async fn store_email(from: String, rcpt: String, body: String) -> Result<(), Box<dyn Error>> {
+async fn store_email(
+    from: String,
+    rcpt: String,
+    body: String,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
     let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
-    let path = crate_root.join("mailbox").join(safe_rcpt);
+    let path = crate_root.join("mailbox").join(&safe_rcpt);
     fs::create_dir_all(&path).await?;
-    let file_path = path.join(format!("{}.eml", Uuid::new_v4()));
+    let id = Uuid::new_v4().to_string();
+    let file_path = path.join(format!("{}.eml", id));
     let file_path_str = file_path.to_str().unwrap();
     let mut file = File::create(&file_path).await?;
     println!("Started storing email to {}", file_path_str);
     if !is_mime_valid(&body).await {
-        file.write_all(format!("From: {}\r\n", from).as_bytes())
-            .await?;
-        file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
-            .await?;
-        file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
+        file.write_all(format!("From: {}\r\n", from).as_bytes()).await?;
+        file.write_all(format!("To: {}\r\n", rcpt).as_bytes()).await?;
+        file
+            .write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
             .await?;
     }
     file.write_all(body.as_bytes()).await?;
     println!("Stored: {}", file_path_str);
+
+    let headers = parse_mime_headers(&body).unwrap_or_default();
+    let subject = headers.get("Subject").cloned().unwrap_or_default();
+    let metadata = EmailMetadata {
+        id,
+        sender: from,
+        recipient: rcpt,
+        subject,
+        path: file_path.clone(),
+    };
+    let db_path = crate_root.join("mailbox").join("metadata.db");
+    store_metadata(db_path, &metadata).await?;
     Ok(())
 }
