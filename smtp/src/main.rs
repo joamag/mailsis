@@ -1,11 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use mailsis_utils::{
-    get_crate_root,
-    is_mime_valid,
-    load_tls_server_config,
-    parse_mime_headers,
-    store_metadata,
+    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, store_metadata,
     EmailMetadata,
 };
 use std::{
@@ -422,7 +418,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in rcpts {
-                if let Err(error) = store_email(from.clone(), rcpt, body.clone()).await {
+                if let Err(error) = store_email(from.clone(), rcpt, body.clone(), true).await {
                     println!("Error storing email: {}", error);
                 }
             }
@@ -579,6 +575,7 @@ async fn store_email(
     from: String,
     rcpt: String,
     body: String,
+    store_meta: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
     let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
@@ -590,25 +587,30 @@ async fn store_email(
     let mut file = File::create(&file_path).await?;
     println!("Started storing email to {}", file_path_str);
     if !is_mime_valid(&body).await {
-        file.write_all(format!("From: {}\r\n", from).as_bytes()).await?;
-        file.write_all(format!("To: {}\r\n", rcpt).as_bytes()).await?;
-        file
-            .write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
+        file.write_all(format!("From: {}\r\n", from).as_bytes())
+            .await?;
+        file.write_all(format!("To: {}\r\n", rcpt).as_bytes())
+            .await?;
+        file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
             .await?;
     }
     file.write_all(body.as_bytes()).await?;
     println!("Stored: {}", file_path_str);
 
-    let headers = parse_mime_headers(&body).unwrap_or_default();
-    let subject = headers.get("Subject").cloned().unwrap_or_default();
-    let metadata = EmailMetadata {
-        id,
-        sender: from,
-        recipient: rcpt,
-        subject,
-        path: file_path.clone(),
-    };
-    let db_path = crate_root.join("mailbox").join("metadata.db");
-    store_metadata(db_path, &metadata).await?;
+    // checks if the metadata should be stored, if so, it will
+    // parse the headers and store the metadata in the database
+    if store_meta {
+        let headers = parse_mime_headers(&body).unwrap_or_default();
+        let subject = headers.get("Subject").cloned().unwrap_or_default();
+        let metadata = EmailMetadata {
+            id,
+            sender: from,
+            recipient: rcpt,
+            subject,
+            path: file_path.clone(),
+        };
+        let db_path = crate_root.join("mailbox").join("metadata.db");
+        store_metadata(db_path, &metadata).await?;
+    }
     Ok(())
 }
