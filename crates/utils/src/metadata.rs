@@ -56,8 +56,11 @@ impl EmailMetadata {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use rusqlite::{params, Connection};
+    use std::path::PathBuf;
     use tempfile::NamedTempFile;
+
+    use super::EmailMetadata;
 
     #[test]
     fn test_email_metadata_new() {
