@@ -271,7 +271,7 @@ impl IMAPSession {
 
         for message in messages_range {
             let index = message_indices[&message];
-            let contents = self.fetch_message(&message).await.unwrap();
+            let contents = self.fetch_message(message).await.unwrap();
             let slices = parts[4..]
                 .iter()
                 .filter_map(|s| {
