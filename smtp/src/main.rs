@@ -229,7 +229,8 @@ impl SMTPSession {
             return Ok(());
         }
 
-        // Check if the value is a valid email address
+        // Check if the value is a valid email address, if so, add it to the
+        // rcpts set and write a 250 response, otherwise write a 501 response
         if let Some(value) = value.strip_prefix("TO:") {
             let rcpt = value
                 .trim()
