@@ -297,7 +297,7 @@ impl SMTPSession {
         let from = std::mem::take(&mut self.from);
         let rcpts = std::mem::take(&mut self.rcpts);
 
-        let _ = tx.send((from, rcpts, data)).await;
+        tx.send((from, rcpts, data)).await?;
         self.write_response(writer, 250, "Message accepted").await;
 
         Ok(())
