@@ -229,20 +229,21 @@ impl SMTPSession {
             return Ok(());
         }
 
+        // Check if the value is a valid email address
         if let Some(value) = value.strip_prefix("TO:") {
-            self.rcpts.insert(
-                value
-                    .trim()
-                    .strip_prefix("<")
-                    .and_then(|s| s.strip_suffix(">"))
-                    .unwrap()
-                    .to_string(),
-            );
+            let rcpt = value
+                .trim()
+                .strip_prefix("<")
+                .and_then(|s| s.strip_suffix(">"))
+                .unwrap()
+                .to_string();
+            self.rcpts.insert(rcpt);
             self.write_response(writer, 250, "OK").await;
         } else {
             self.write_response(writer, 501, "Syntax error in parameters or arguments")
                 .await;
         }
+
         Ok(())
     }
 
