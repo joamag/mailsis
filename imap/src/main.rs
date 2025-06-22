@@ -57,7 +57,7 @@ impl IMAPSession {
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 4 {
             self.authenticated = true;
-            self.username = Some(parts[2].to_string().trim_matches('"').to_string());
+            self.username = Some(parts[2].trim_matches('"').to_string());
             self.write_response(writer, tag, "OK", "LOGIN completed")
                 .await?;
         } else {
@@ -154,11 +154,10 @@ impl IMAPSession {
         parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 4 {
-            let message_id = parts[2].to_string();
+            let message_id = parts[2];
             let message_sequence = 1;
-            let format = parts[3].to_string();
-            let format_inner = format[1..format.len() - 1].to_string();
-            let message = self.fetch_message(&message_id).await?;
+            let format_inner = &parts[3][1..parts[3].len() - 1];
+            let message = self.fetch_message(message_id).await?;
             self.write_response(
                 writer,
                 "*",
@@ -261,7 +260,7 @@ impl IMAPSession {
         // the string based IMAP range into a rust one
         let range = uid_fetch_range_str(parts[3], messages.len() as u32).ok_or("Invalid range")?;
         let (start, end) = ((*range.start() - 1) as usize, (*range.end() - 1) as usize);
-        let messages_range = messages[start..=end].to_vec();
+        let messages_range = &messages[start..=end];
 
         // Save the message indices in a hashmap for faster lookup
         let message_indices: std::collections::HashMap<_, _> = messages
@@ -272,32 +271,23 @@ impl IMAPSession {
 
         for message in messages_range {
             let index = message_indices[&message];
-            let contents = self.fetch_message(&message).await.unwrap();
-            let slices = parts[4..parts.len()]
+            let contents = self.fetch_message(message).await.unwrap();
+            let slices = parts[4..]
                 .iter()
-                .map(|s| {
-                    let s = s.to_string();
-                    let s = s.trim_matches('(').trim_matches(')');
-                    match s {
-                        "FLAGS" => "FLAGS (\\Unseen)".to_string(),
-                        "RFC822.SIZE" => format!("RFC822.SIZE {}", message.len()),
-                        "BODY.PEEK[HEADER.FIELDS" => {
-                            format!(
-                                "BODY[HEADER.FIELDS (To From Subject)] {{{}}}\r\n{}",
-                                contents.len(),
-                                contents
-                            )
-                        }
-                        "BODY[]" => {
-                            format!("BODY[] {{{}}}\r\n{}", contents.len(), contents)
-                        }
-                        _ => "".to_string(),
+                .filter_map(|s| {
+                    let trimmed = s.trim_matches(['(', ')']);
+                    match trimmed {
+                        "FLAGS" => Some("FLAGS (\\Unseen)".to_string()),
+                        "RFC822.SIZE" => Some(format!("RFC822.SIZE {}", message.len())),
+                        "BODY.PEEK[HEADER.FIELDS" => Some(format!(
+                            "BODY[HEADER.FIELDS (To From Subject)] {{{}}}\r\n{}",
+                            contents.len(),
+                            contents
+                        )),
+                        "BODY[]" => Some(format!("BODY[] {{{}}}\r\n{}", contents.len(), contents)),
+                        _ => None,
                     }
                 })
-                .collect::<Vec<String>>()
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
                 .collect::<Vec<String>>()
                 .join(" ");
             self.write_response(
@@ -394,7 +384,7 @@ impl IMAPSession {
 
     fn safe_username(&self) -> String {
         self.username
-            .clone()
+            .as_deref()
             .unwrap_or_default()
             .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
     }

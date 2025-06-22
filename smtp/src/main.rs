@@ -294,12 +294,11 @@ impl SMTPSession {
         }
 
         let data = String::from_utf8_lossy(&buffer_data).into_owned();
+        let from = std::mem::take(&mut self.from);
+        let rcpts = std::mem::take(&mut self.rcpts);
 
-        let _ = tx.send((self.from.clone(), self.rcpts.clone(), data)).await;
+        tx.send((from, rcpts, data)).await?;
         self.write_response(writer, 250, "Message accepted").await;
-
-        self.from.clear();
-        self.rcpts.clear();
 
         Ok(())
     }
@@ -417,7 +416,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in rcpts {
-                if let Err(error) = store_email(from.clone(), rcpt, body.clone(), true).await {
+                if let Err(error) = store_email(&from, &rcpt, &body, true).await {
                     println!("Error storing email: {error}");
                 }
             }
@@ -571,9 +570,9 @@ fn load_credentials(path: &str) -> HashMap<String, String> {
 ///
 /// There's no limit to the number of emails that can be stored.
 async fn store_email(
-    from: String,
-    rcpt: String,
-    body: String,
+    from: &str,
+    rcpt: &str,
+    body: &str,
     store_meta: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
@@ -585,7 +584,7 @@ async fn store_email(
     let file_path_str = file_path.to_str().unwrap();
     let mut file = File::create(&file_path).await?;
     println!("Started storing email to {file_path_str}");
-    if !is_mime_valid(&body).await {
+    if !is_mime_valid(body).await {
         file.write_all(format!("From: {from}\r\n").as_bytes())
             .await?;
         file.write_all(format!("To: {rcpt}\r\n").as_bytes()).await?;
@@ -598,9 +597,15 @@ async fn store_email(
     // checks if the metadata should be stored, if so, it will
     // parse the headers and store the metadata in the database
     if store_meta {
-        let headers = parse_mime_headers(&body).unwrap_or_default();
+        let headers = parse_mime_headers(body).unwrap_or_default();
         let subject = headers.get("Subject").cloned().unwrap_or_default();
-        let metadata = EmailMetadata::new(message_id, from, rcpt, subject, file_path.clone());
+        let metadata = EmailMetadata::new(
+            message_id,
+            from.to_string(),
+            rcpt.to_string(),
+            subject,
+            file_path.clone(),
+        );
         let db_path = crate_root.join("mailbox").join("metadata.db");
         metadata.store_sqlite(db_path).await?;
     }
