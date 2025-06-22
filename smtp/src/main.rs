@@ -6,6 +6,7 @@ use mailsis_utils::{
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
+    mem::take,
     path::PathBuf,
     str::{FromStr, SplitWhitespace},
     sync::Arc,
@@ -294,8 +295,8 @@ impl SMTPSession {
         }
 
         let data = String::from_utf8_lossy(&buffer_data).into_owned();
-        let from = std::mem::take(&mut self.from);
-        let rcpts = std::mem::take(&mut self.rcpts);
+        let from = take(&mut self.from);
+        let rcpts = take(&mut self.rcpts);
 
         tx.send((from, rcpts, data)).await?;
         self.write_response(writer, 250, "Message accepted").await;
