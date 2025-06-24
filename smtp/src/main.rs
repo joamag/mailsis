@@ -617,8 +617,11 @@ async fn store_email(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use base64::{engine::general_purpose, Engine};
+    use std::{collections::HashMap, sync::Arc};
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    use super::SMTPSession;
 
     #[tokio::test]
     async fn test_handle_ehlo_helo_writes_greeting() {
