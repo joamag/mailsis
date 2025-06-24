@@ -614,3 +614,91 @@ async fn store_email(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use base64::{engine::general_purpose, Engine};
+    use std::{collections::HashMap, sync::Arc};
+    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    use super::SMTPSession;
+
+    #[tokio::test]
+    async fn test_handle_ehlo_helo_writes_greeting() {
+        let creds = Arc::new(HashMap::new());
+        let session = SMTPSession::new(creds, false);
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_ehlo_helo(&mut server).await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(
+            output,
+            "250-localhost greets you\r\n250-STARTTLS\r\n250 AUTH LOGIN\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_auth_login_success() {
+        let mut map = HashMap::new();
+        map.insert("user".to_string(), "pass".to_string());
+        let creds = Arc::new(map);
+        let mut session = SMTPSession::new(creds, false);
+
+        let encoded_user = general_purpose::STANDARD.encode("user");
+        let encoded_pass = general_purpose::STANDARD.encode("pass");
+        let input = format!("{encoded_user}\r\n{encoded_pass}\r\n");
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, mut client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let write_task = tokio::spawn(async move {
+            client_write.write_all(input.as_bytes()).await.unwrap();
+            drop(client_write);
+        });
+
+        let mut line = String::new();
+        session
+            .handle_auth_login(&mut reader, &mut server_write, &mut line)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+        write_task.await.unwrap();
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(session.authenticated);
+        assert_eq!(
+            output,
+            "334 VXNlcm5hbWU6\r\n334 UGFzc3dvcmQ6\r\n235 Authentication successful\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_mail_and_rcpt_adds_addresses() {
+        let creds = Arc::new(HashMap::new());
+        let mut session = SMTPSession::new(creds, false);
+
+        let (mut client, mut server) = duplex(1024);
+        session
+            .handle_mail(&mut server, "FROM:<sender@example.com>")
+            .await
+            .unwrap();
+        session
+            .handle_rcpt(&mut server, "TO:<recipient@example.com>")
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+
+        assert_eq!(session.from, "sender@example.com");
+        assert!(session.rcpts.contains("recipient@example.com"));
+        assert_eq!(output, "250 OK\r\n250 OK\r\n");
+    }
+}

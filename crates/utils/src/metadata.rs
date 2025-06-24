@@ -149,7 +149,7 @@ mod tests {
         );
 
         let result = metadata.store_sqlite(db_path).await;
-        assert!(result.is_ok(), "Failed to store metadata: {:?}", result);
+        assert!(result.is_ok(), "Failed to store metadata: {result:?}");
 
         let conn = Connection::open(db_path).unwrap();
         let mut stmt = conn
@@ -199,11 +199,7 @@ mod tests {
         );
 
         let result1 = metadata1.store_sqlite(db_path).await;
-        assert!(
-            result1.is_ok(),
-            "First insert should succeed: {:?}",
-            result1
-        );
+        assert!(result1.is_ok(), "First insert should succeed: {result1:?}");
 
         let result2 = metadata2.store_sqlite(db_path).await;
         assert!(
@@ -234,10 +230,10 @@ mod tests {
         );
 
         let result1 = metadata1.store_sqlite(db_path).await;
-        assert!(result1.is_ok(), "First insert failed: {:?}", result1);
+        assert!(result1.is_ok(), "First insert failed: {result1:?}");
 
         let result2 = metadata2.store_sqlite(db_path).await;
-        assert!(result2.is_ok(), "Second insert failed: {:?}", result2);
+        assert!(result2.is_ok(), "Second insert failed: {result2:?}");
 
         let conn = Connection::open(db_path).unwrap();
         let count: i64 = conn
@@ -263,8 +259,7 @@ mod tests {
         let result = metadata.store_sqlite(db_path).await;
         assert!(
             result.is_ok(),
-            "Failed to store metadata with special characters: {:?}",
-            result
+            "Failed to store metadata with special characters: {result:?}"
         );
 
         let conn = Connection::open(db_path).unwrap();
@@ -327,8 +322,7 @@ mod tests {
         let store_result = original_metadata.store_sqlite(db_path).await;
         assert!(
             store_result.is_ok(),
-            "Failed to store metadata: {:?}",
-            store_result
+            "Failed to store metadata: {store_result:?}"
         );
 
         // Then retrieve it
@@ -336,8 +330,7 @@ mod tests {
             EmailMetadata::retrieve_sqlite(db_path, "retrieve-test-id".to_string()).await;
         assert!(
             retrieved_metadata.is_ok(),
-            "Failed to retrieve metadata: {:?}",
-            retrieved_metadata
+            "Failed to retrieve metadata: {retrieved_metadata:?}"
         );
 
         let retrieved = retrieved_metadata.unwrap();
