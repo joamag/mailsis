@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{generate_random_bytes, load_tls_client_config};
 use std::{env::args, error::Error, path::Path, sync::Arc};
 use tokio::{
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     println!("Encoding data...");
-    let encoded_data = general_purpose::STANDARD.encode(&file_data);
+    let encoded_data = STANDARD.encode(&file_data);
 
     // Send email headers
     let boundary = format!("boundary-{}", Uuid::new_v4());

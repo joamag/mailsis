@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
 use mailsis_utils::{
     get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, EmailMetadata,
@@ -129,18 +129,14 @@ impl SMTPSession {
 
         line.clear();
         reader.read_line(line).await.ok();
-        let username = general_purpose::STANDARD
-            .decode(line.trim())
-            .unwrap_or_default();
+        let username = STANDARD.decode(line.trim()).unwrap_or_default();
         let username = String::from_utf8_lossy(&username);
 
         self.write_response(writer, 334, "UGFzc3dvcmQ6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
-        let password = general_purpose::STANDARD
-            .decode(line.trim())
-            .unwrap_or_default();
+        let password = STANDARD.decode(line.trim()).unwrap_or_default();
         let password = String::from_utf8_lossy(&password);
 
         if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
@@ -164,18 +160,14 @@ impl SMTPSession {
         line: &mut String,
         encoded_user: &str,
     ) -> Result<(), Box<dyn Error>> {
-        let username = general_purpose::STANDARD
-            .decode(encoded_user.trim())
-            .unwrap_or_default();
+        let username = STANDARD.decode(encoded_user.trim()).unwrap_or_default();
         let username = String::from_utf8_lossy(&username);
 
         self.write_response(writer, 334, "UGFzc3dvcmQ6").await;
 
         line.clear();
         reader.read_line(line).await.ok();
-        let password = general_purpose::STANDARD
-            .decode(line.trim())
-            .unwrap_or_default();
+        let password = STANDARD.decode(line.trim()).unwrap_or_default();
         let password = String::from_utf8_lossy(&password);
 
         if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
@@ -617,7 +609,7 @@ async fn store_email(
 
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose, Engine};
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use std::{collections::HashMap, sync::Arc};
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
 
@@ -647,8 +639,8 @@ mod tests {
         let creds = Arc::new(map);
         let mut session = SMTPSession::new(creds, false);
 
-        let encoded_user = general_purpose::STANDARD.encode("user");
-        let encoded_pass = general_purpose::STANDARD.encode("pass");
+        let encoded_user = STANDARD.encode("user");
+        let encoded_pass = STANDARD.encode("pass");
         let input = format!("{encoded_user}\r\n{encoded_pass}\r\n");
 
         let (client, server) = duplex(1024);
