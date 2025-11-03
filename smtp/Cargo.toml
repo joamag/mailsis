@@ -7,7 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/joamag/mailsis"
 keywords = ["email", "smtp", "imap", "server"]
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.83"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
