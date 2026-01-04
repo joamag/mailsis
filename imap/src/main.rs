@@ -143,7 +143,7 @@ impl<A: AuthEngine> IMAPSession<A> {
                         writer,
                         tag,
                         "NO",
-                        &format!("mailbox \"{}\" does not exist", mailbox_name),
+                        &format!("mailbox \"{mailbox_name}\" does not exist"),
                     )
                     .await?;
                     return Ok(());
