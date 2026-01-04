@@ -23,7 +23,7 @@ impl Display for AuthError {
         match self {
             AuthError::InvalidCredentials => write!(f, "Invalid credentials"),
             AuthError::UserNotFound => write!(f, "User not found"),
-            AuthError::EngineError(msg) => write!(f, "Engine error: {}", msg),
+            AuthError::EngineError(msg) => write!(f, "Engine error: {msg}"),
         }
     }
 }
