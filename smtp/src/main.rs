@@ -25,6 +25,7 @@ const PORT: u16 = 2525;
 /// This struct is used to store the state of the SMTP session, including the
 /// from address, the recipients, whether the session is authenticated, whether
 /// TLS is required, and the authentication engine.
+#[derive(Debug, Default)]
 struct SMTPSession<A: AuthEngine> {
     from: String,
     rcpts: HashSet<String>,
@@ -34,16 +35,13 @@ struct SMTPSession<A: AuthEngine> {
     auth_engine: Arc<A>,
 }
 
-impl<A: AuthEngine> SMTPSession<A> {
+impl<A: AuthEngine + Default> SMTPSession<A> {
     /// Create a new SMTP session with default values.
     pub fn new(auth_engine: Arc<A>, auth_required: bool) -> Self {
         Self {
-            from: String::new(),
-            rcpts: HashSet::new(),
-            authenticated: false,
             auth_required,
-            starttls: false,
             auth_engine,
+            ..Default::default()
         }
     }
 

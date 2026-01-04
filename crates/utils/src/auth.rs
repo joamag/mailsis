@@ -31,7 +31,7 @@ impl std::error::Error for AuthError {}
 ///
 /// Implementations of this trait provide different authentication backends,
 /// such as in-memory storage, databases, LDAP, etc.
-pub trait AuthEngine: Send + Sync {
+pub trait AuthEngine: Send + Sync + Default {
     /// Authenticates a user with the given username and password.
     ///
     /// Returns `Ok(true)` if authentication succeeds, `Ok(false)` if the
