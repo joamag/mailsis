@@ -50,15 +50,19 @@ impl From<io::Error> for StorageError {
 /// Represents an email message for storage operations.
 #[derive(Debug, Clone)]
 pub struct EmailMessage {
-    /// Unique message identifier.
+    /// Unique message identifier, RFC 5322 message-id format.
     pub message_id: String,
-    /// Sender address.
+
+    /// Sender address, RFC 5322 address format.
     pub from: String,
-    /// Recipient address.
+
+    /// Recipient address, RFC 5322 address format.
     pub to: String,
-    /// Email subject.
+
+    /// Email subject, ASCII encoded.
     pub subject: String,
-    /// Raw email body/content.
+
+    /// Raw email body/content, ASCII encoded.
     pub body: String,
 }
 
@@ -142,8 +146,13 @@ pub trait StorageEngine: Send + Sync {
 /// `{base_path}/{user}/{message_id}.eml`
 #[derive(Debug, Clone)]
 pub struct FileStorageEngine {
+    /// Base path for storing email messages, ASCII encoded.
     base_path: PathBuf,
+
+    /// Path to the metadata database, ASCII encoded.
     db_path: PathBuf,
+
+    /// Whether to store metadata in the database.
     store_metadata: bool,
 }
 
@@ -283,6 +292,7 @@ impl Default for FileStorageEngine {
 pub struct MemoryStorageEngine {
     /// Storage for messages: user -> (message_id -> message)
     messages: RwLock<HashMap<String, HashMap<String, EmailMessage>>>,
+
     /// Storage for mailboxes: user -> list of mailbox names
     mailboxes: RwLock<HashMap<String, Vec<String>>>,
 }
