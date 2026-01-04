@@ -441,7 +441,6 @@ async fn handle_smtp_session(
 ) -> Result<(), Box<dyn Error>> {
     // Optimize TCP settings, removing the delay and setting the TTL to 64
     stream.set_nodelay(true).expect("Failed to set TCP_NODELAY");
-    stream.set_linger(None).expect("Failed to set SO_LINGER");
     stream.set_ttl(64).expect("Failed to set TTL");
 
     // Create a new SMTP session with default values, split the stream into reader and writer
