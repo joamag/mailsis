@@ -80,6 +80,10 @@ impl EmailMessage {
         }
     }
 
+    pub fn from_raw(from: &str, to: &str, body: &str) -> Self {
+        Self::new(from.to_string(), to.to_string(), body.to_string())
+    }
+
     pub fn with_id(
         message_id: String,
         from: String,

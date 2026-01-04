@@ -431,7 +431,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in rcpts {
-                let message = EmailMessage::new(from.clone(), rcpt, body.clone());
+                let message = EmailMessage::from_raw(&from, &rcpt, &body);
                 if let Err(error) = storage.store(&message).await {
                     println!("Error storing email: {error}");
                 }
