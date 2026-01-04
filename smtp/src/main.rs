@@ -1,16 +1,10 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
 use mailsis_utils::{
-    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, EmailMetadata,
+    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, AuthEngine,
+    EmailMetadata, MemoryAuthEngine,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    mem::take,
-    path::PathBuf,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashSet, error::Error, mem::take, path::PathBuf, str::FromStr, sync::Arc};
 use tokio::{
     fs::{self, File},
     io::{
@@ -30,24 +24,26 @@ const PORT: u16 = 2525;
 ///
 /// This struct is used to store the state of the SMTP session, including the
 /// from address, the recipients, whether the session is authenticated, whether
-/// TLS is required, and the credentials.
-#[derive(Debug, Default)]
-struct SMTPSession {
+/// TLS is required, and the authentication engine.
+struct SMTPSession<A: AuthEngine> {
     from: String,
     rcpts: HashSet<String>,
     authenticated: bool,
     auth_required: bool,
     starttls: bool,
-    credentials: Arc<HashMap<String, String>>,
+    auth_engine: Arc<A>,
 }
 
-impl SMTPSession {
+impl<A: AuthEngine> SMTPSession<A> {
     /// Create a new SMTP session with default values.
-    pub fn new(credentials: Arc<HashMap<String, String>>, auth_required: bool) -> Self {
+    pub fn new(auth_engine: Arc<A>, auth_required: bool) -> Self {
         Self {
-            credentials,
+            from: String::new(),
+            rcpts: HashSet::new(),
+            authenticated: false,
             auth_required,
-            ..Default::default()
+            starttls: false,
+            auth_engine,
         }
     }
 
@@ -142,7 +138,11 @@ impl SMTPSession {
         let password = STANDARD.decode(line.trim()).unwrap_or_default();
         let password = String::from_utf8_lossy(&password);
 
-        if self.credentials.get(username.trim()).map(|p| p.as_str()) == Some(password.trim()) {
+        if self
+            .auth_engine
+            .authenticate(username.trim(), password.trim())
+            .unwrap_or(false)
+        {
             self.write_response(writer, 235, "Authentication successful")
                 .await;
             self.authenticated = true;
@@ -173,7 +173,11 @@ impl SMTPSession {
         let password = STANDARD.decode(line.trim()).unwrap_or_default();
         let password = String::from_utf8_lossy(&password);
 
-        if self.credentials.get(username.trim()).map(|p| p.as_str()) == Some(password.trim()) {
+        if self
+            .auth_engine
+            .authenticate(username.trim(), password.trim())
+            .unwrap_or(false)
+        {
             self.write_response(writer, 235, "Authentication successful")
                 .await;
             self.authenticated = true;
@@ -421,7 +425,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&listening).await?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config);
-    let credentials = Arc::new(load_credentials("users.txt"));
+    let auth_engine = Arc::new(load_credentials("users.txt"));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
 
     // Spawn a task to handle the email storage, this is a long running
@@ -442,20 +446,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let (stream, _) = listener.accept().await?;
         let tls_acceptor = tls_acceptor.clone();
         let tx = tx.clone();
-        let credentials = credentials.clone();
+        let auth_engine = auth_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_smtp_session(stream, tls_acceptor, tx, credentials).await {
+            if let Err(e) = handle_smtp_session(stream, tls_acceptor, tx, auth_engine).await {
                 eprintln!("Error: {e}");
             }
         });
     }
 }
 
-async fn handle_smtp_session(
+async fn handle_smtp_session<A: AuthEngine + 'static>(
     stream: TcpStream,
     tls_acceptor: TlsAcceptor,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
-    credentials: Arc<HashMap<String, String>>,
+    auth_engine: Arc<A>,
 ) -> Result<(), Box<dyn Error>> {
     // Optimize TCP settings, removing the delay and setting the TTL to 64
     stream.set_nodelay(true).expect("Failed to set TCP_NODELAY");
@@ -463,18 +467,18 @@ async fn handle_smtp_session(
 
     // Create a new SMTP session with default values, split the stream into reader and writer
     // and handle the loop starting the SMTP session
-    let mut session = SMTPSession::new(credentials.clone(), false);
+    let mut session = SMTPSession::new(auth_engine, false);
     let (reader, writer) = split(stream);
     handle_stream(reader, writer, tls_acceptor, tx, &mut session).await?;
     Ok(())
 }
 
-async fn handle_stream(
+async fn handle_stream<A: AuthEngine + 'static>(
     reader: ReadHalf<TcpStream>,
     mut writer: WriteHalf<TcpStream>,
     tls_acceptor: TlsAcceptor,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
-    session: &mut SMTPSession,
+    session: &mut SMTPSession<A>,
 ) -> Result<(), Box<dyn Error>> {
     let mut line = String::with_capacity(4096);
     let mut reader = BufReader::new(reader);
@@ -526,10 +530,10 @@ async fn handle_stream(
     Ok(())
 }
 
-async fn handle_tls_stream(
+async fn handle_tls_stream<A: AuthEngine + 'static>(
     stream: TlsStream<TcpStream>,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
-    session: &mut SMTPSession,
+    session: &mut SMTPSession<A>,
 ) -> Result<(), Box<dyn Error>> {
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
@@ -557,23 +561,15 @@ async fn handle_tls_stream(
     Ok(())
 }
 
-/// Loads the credentials from the file and returns a HashMap of usernames and passwords.
+/// Loads the credentials from the file and returns a MemoryAuthEngine.
 ///
 /// The file should be formatted as follows:
+/// ```text
 /// username:password
 /// username2:password2
-/// username3:password3
-/// ...
-fn load_credentials(path: &str) -> HashMap<String, String> {
-    let mut creds = HashMap::new();
-    if let Ok(content) = std::fs::read_to_string(path) {
-        for line in content.lines() {
-            if let Some((user, pass)) = line.split_once(':') {
-                creds.insert(user.trim().to_string(), pass.trim().to_string());
-            }
-        }
-    }
-    creds
+/// ```
+fn load_credentials(path: &str) -> MemoryAuthEngine {
+    MemoryAuthEngine::from_file(path)
 }
 
 /// Stores the email in the mailbox directory, creates the directory if it doesn't exist.
@@ -627,6 +623,7 @@ async fn store_email(
 #[cfg(test)]
 mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
+    use mailsis_utils::MemoryAuthEngine;
     use std::{collections::HashMap, sync::Arc};
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
 
@@ -634,8 +631,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_ehlo_helo_writes_greeting() {
-        let creds = Arc::new(HashMap::new());
-        let session = SMTPSession::new(creds, false);
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let session = SMTPSession::new(auth_engine, false);
 
         let (mut client, mut server) = duplex(1024);
         session.handle_ehlo_helo(&mut server).await.unwrap();
@@ -653,8 +650,8 @@ mod tests {
     async fn test_handle_auth_login_success() {
         let mut map = HashMap::new();
         map.insert("user".to_string(), "pass".to_string());
-        let creds = Arc::new(map);
-        let mut session = SMTPSession::new(creds, false);
+        let auth_engine = Arc::new(MemoryAuthEngine::from_map(map));
+        let mut session = SMTPSession::new(auth_engine, false);
 
         let encoded_user = STANDARD.encode("user");
         let encoded_pass = STANDARD.encode("pass");
@@ -689,8 +686,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_mail_and_rcpt_adds_addresses() {
-        let creds = Arc::new(HashMap::new());
-        let mut session = SMTPSession::new(creds, false);
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false);
 
         let (mut client, mut server) = duplex(1024);
         session
