@@ -1,7 +1,10 @@
-use mailsis_utils::{get_crate_root, uid_fetch_range_str, AuthEngine, MemoryAuthEngine};
 use std::{error::Error, path::PathBuf, sync::Arc};
+
+use mailsis_utils::{
+    get_crate_root, uid_fetch_range_str, AuthEngine, FileStorageEngine, MemoryAuthEngine,
+    StorageEngine,
+};
 use tokio::{
-    fs::{create_dir_all, read_dir, read_to_string},
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
@@ -9,29 +12,29 @@ use tokio::{
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 1430;
 
-struct IMAPSession<A: AuthEngine> {
+struct IMAPSession<A: AuthEngine, S: StorageEngine> {
     authenticated: bool,
     username: Option<String>,
     mailbox: Option<String>,
-    crate_root: PathBuf,
     safe_username: Option<String>,
     auth_engine: Arc<A>,
+    storage_engine: Arc<S>,
 }
 
-impl<A: AuthEngine> IMAPSession<A> {
-    fn new(auth_engine: Arc<A>) -> Self {
+impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
+    fn new(auth_engine: Arc<A>, storage_engine: Arc<S>) -> Self {
         Self {
             authenticated: false,
             username: None,
             mailbox: None,
-            crate_root: get_crate_root().unwrap_or_else(|_| PathBuf::from(".")),
             safe_username: None,
             auth_engine,
+            storage_engine,
         }
     }
 }
 
-impl<A: AuthEngine> IMAPSession<A> {
+impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
     async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
         &mut self,
         _reader: &mut R,
@@ -255,8 +258,10 @@ impl<A: AuthEngine> IMAPSession<A> {
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 2 {
             let mailbox = parts[2].trim_matches('"').to_string();
-            let path = self.mailbox_path().join(format!("{mailbox}.mbox"));
-            create_dir_all(path).await?;
+            self.storage_engine
+                .create_mailbox(self.safe_username(), &mailbox)
+                .await
+                .map_err(|e| format!("Failed to create mailbox: {e}"))?;
             self.write_response(writer, tag, "OK", "CREATE completed")
                 .await?;
         } else {
@@ -366,24 +371,20 @@ impl<A: AuthEngine> IMAPSession<A> {
     }
 
     async fn search_messages(&self, _criteria: &str) -> Result<Vec<String>, Box<dyn Error>> {
-        let mut messages = Vec::new();
-        let mut entries = read_dir(&self.mailbox_path()).await?;
-
-        while let Some(entry) = entries.next_entry().await? {
-            let entry_path = entry.path();
-            let path_str = entry_path.to_str().unwrap();
-            if path_str.ends_with(".eml") {
-                let file_stem = entry_path.file_stem().unwrap().to_str().unwrap();
-                messages.push(file_stem.to_string());
-            }
-        }
-
+        let messages = self
+            .storage_engine
+            .list(self.safe_username())
+            .await
+            .map_err(|e| format!("Failed to list messages: {e}"))?;
         Ok(messages)
     }
 
     async fn fetch_message(&self, message_id: &str) -> Result<String, Box<dyn Error>> {
-        let path = self.mailbox_path().join(format!("{message_id}.eml"));
-        let content = read_to_string(path).await?;
+        let content = self
+            .storage_engine
+            .retrieve(self.safe_username(), message_id)
+            .await
+            .map_err(|e| format!("Failed to fetch message: {e}"))?;
         Ok(content)
     }
 
@@ -417,10 +418,6 @@ impl<A: AuthEngine> IMAPSession<A> {
         Ok(())
     }
 
-    fn mailbox_path(&self) -> PathBuf {
-        self.crate_root.join("mailbox").join(self.safe_username())
-    }
-
     fn safe_username(&self) -> &str {
         self.safe_username.as_deref().unwrap_or("")
     }
@@ -428,6 +425,7 @@ impl<A: AuthEngine> IMAPSession<A> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let crate_root = get_crate_root().unwrap_or_else(|_| PathBuf::from("."));
     let host = std::env::var("HOST").unwrap_or_else(|_| HOST.to_string());
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| PORT.to_string())
@@ -437,28 +435,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&listening).await?;
 
     let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
+    let storage_engine = Arc::new(FileStorageEngine::new(crate_root.join("mailbox")));
 
     println!("Mailsis-IMAP running on {}", &listening);
 
     loop {
         let (stream, _) = listener.accept().await?;
         let auth_engine = auth_engine.clone();
+        let storage_engine = storage_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream, auth_engine).await {
+            if let Err(e) = handle_client(stream, auth_engine, storage_engine).await {
                 eprintln!("Error: {e}");
             }
         });
     }
 }
 
-async fn handle_client<A: AuthEngine + 'static>(
+async fn handle_client<A: AuthEngine + 'static, S: StorageEngine + 'static>(
     stream: TcpStream,
     auth_engine: Arc<A>,
+    storage_engine: Arc<S>,
 ) -> Result<(), Box<dyn Error>> {
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut line = String::new();
-    let mut session = IMAPSession::new(auth_engine);
+    let mut session = IMAPSession::new(auth_engine, storage_engine);
 
     session
         .write_response(&mut w, "*", "OK", "Mailsis IMAP ready")

@@ -1,3 +1,5 @@
+use std::{error::Error, fs::File, io::BufReader, path::PathBuf, str::FromStr};
+
 use rustls::{
     pki_types::{
         pem::{PemObject, SectionKind},
@@ -7,8 +9,6 @@ use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
 };
 use rustls_pemfile::certs;
-
-use std::{error::Error, fs::File, io::BufReader, path::PathBuf, str::FromStr};
 
 use crate::get_crate_root;
 

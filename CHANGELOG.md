@@ -12,19 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Added modular authentication system with `AuthEngine` trait
 * Added `MemoryAuthEngine` for in-memory credential storage
 * Added `AuthError` enum for authentication error handling
+* Added modular storage system with `StorageEngine` trait
+* Added `FileStorageEngine` for filesystem-based email storage
+* Added `MemoryStorageEngine` for in-memory email storage (useful for testing)
+* Added `EmailMessage` struct for representing email messages
+* Added `StorageError` enum for storage error handling
 * Added IMAP credential verification (previously accepted any login)
 * Added `RSET` command support to SMTP server
 * Added Python SMTP client example (`smtp/examples/smtp_client.py`)
 * Added `passwords/example.txt` file for test credentials
 * Added unit tests for the SMTP server
 * Added unit tests for `MemoryAuthEngine`
+* Added unit tests for `FileStorageEngine`
+* Added unit tests for `MemoryStorageEngine`
 
 ### Changed
 
 * `AuthEngine::authenticate` now returns `AuthResult<()>` instead of `AuthResult<bool>`, with `AuthError::InvalidCredentials` for wrong password and `AuthError::UserNotFound` for non-existent users
 * `MemoryAuthEngine::from_file` now returns `io::Result<Self>` and fails explicitly when the file cannot be read, instead of silently returning an empty credential store
 * SMTP server now uses `AuthEngine` trait for authentication
+* SMTP server now uses `StorageEngine` trait for email storage
 * IMAP server now uses `AuthEngine` trait for authentication
+* IMAP server now uses `StorageEngine` trait for email retrieval
 * SMTP `MAIL FROM` and `RCPT TO` parsing is now case-insensitive (RFC 5321 compliance)
 * Improved IMAP SELECT/EXAMINE error handling for non-existent mailboxes
 * Performance: Avoid `to_uppercase()` allocation in SMTP prefix matching

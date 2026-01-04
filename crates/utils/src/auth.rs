@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::fs::read_to_string;
-use std::io;
-use std::sync::Arc;
+use std::{collections::HashMap, fmt::Display, fs::read_to_string, io, sync::Arc};
 
 /// Result type for authentication operations.
 pub type AuthResult<T> = Result<T, AuthError>;
@@ -139,7 +135,7 @@ impl AuthEngine for MemoryAuthEngine {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{AuthEngine, AuthError, MemoryAuthEngine};
+    use super::{AuthEngine, AuthError, MemoryAuthEngine};
 
     #[test]
     fn test_memory_engine_new() {

@@ -1,12 +1,11 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use chrono::Utc;
-use mailsis_utils::{
-    get_crate_root, is_mime_valid, load_tls_server_config, parse_mime_headers, AuthEngine,
-    EmailMetadata, MemoryAuthEngine,
-};
 use std::{collections::HashSet, error::Error, mem::take, path::PathBuf, str::FromStr, sync::Arc};
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use mailsis_utils::{
+    get_crate_root, load_tls_server_config, AuthEngine, EmailMessage, FileStorageEngine,
+    MemoryAuthEngine, StorageEngine,
+};
 use tokio::{
-    fs::{self, File},
     io::{
         split, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
         BufReader, ReadHalf, WriteHalf,
@@ -15,7 +14,6 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use uuid::Uuid;
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 2525;
@@ -424,14 +422,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let tls_acceptor = TlsAcceptor::from(tls_config);
     let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
+    let storage_engine = Arc::new(FileStorageEngine::new(crate_root.join("mailbox")));
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
 
     // Spawn a task to handle the email storage, this is a long running
     // task that will run until the program is terminated
+    let storage = storage_engine.clone();
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in rcpts {
-                if let Err(error) = store_email(&from, &rcpt, &body, true).await {
+                let message = EmailMessage::from_raw(&from, &rcpt, &body);
+                if let Err(error) = storage.store(&message).await {
                     println!("Error storing email: {error}");
                 }
             }
@@ -570,59 +571,12 @@ fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
     MemoryAuthEngine::from_file(path)
 }
 
-/// Stores the email in the mailbox directory, creates the directory if it doesn't exist.
-///
-/// Each user has their own directory, and each email is stored in a file named with a UUID.
-///
-/// There's no limit to the number of emails that can be stored.
-async fn store_email(
-    from: &str,
-    rcpt: &str,
-    body: &str,
-    store_meta: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let safe_rcpt = rcpt.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-    let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
-    let path = crate_root.join("mailbox").join(&safe_rcpt);
-    fs::create_dir_all(&path).await?;
-    let message_id = Uuid::new_v4().to_string();
-    let file_path = path.join(format!("{message_id}.eml"));
-    let file_path_str = file_path.to_str().unwrap();
-    let mut file = File::create(&file_path).await?;
-    println!("Started storing email to {file_path_str}");
-    if !is_mime_valid(body).await {
-        file.write_all(format!("From: {from}\r\n").as_bytes())
-            .await?;
-        file.write_all(format!("To: {rcpt}\r\n").as_bytes()).await?;
-        file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
-            .await?;
-    }
-    file.write_all(body.as_bytes()).await?;
-    println!("Stored: {file_path_str}");
-
-    // checks if the metadata should be stored, if so, it will
-    // parse the headers and store the metadata in the database
-    if store_meta {
-        let headers = parse_mime_headers(body).unwrap_or_default();
-        let subject = headers.get("Subject").cloned().unwrap_or_default();
-        let metadata = EmailMetadata::new(
-            message_id,
-            from.to_string(),
-            rcpt.to_string(),
-            subject,
-            file_path.clone(),
-        );
-        let db_path = crate_root.join("mailbox").join("metadata.db");
-        metadata.store_sqlite(db_path).await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
     use base64::{engine::general_purpose::STANDARD, Engine};
     use mailsis_utils::MemoryAuthEngine;
-    use std::{collections::HashMap, sync::Arc};
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
 
     use super::SMTPSession;
