@@ -436,7 +436,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listening = format!("{host}:{port}");
     let listener = TcpListener::bind(&listening).await?;
 
-    let auth_engine = Arc::new(load_credentials("users.txt"));
+    let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
 
     println!("Mailsis-IMAP running on {}", &listening);
 
@@ -497,6 +497,6 @@ async fn handle_client<A: AuthEngine + 'static>(
 /// username:password
 /// username2:password2
 /// ```
-fn load_credentials(path: &str) -> MemoryAuthEngine {
+fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
     MemoryAuthEngine::from_file(path)
 }

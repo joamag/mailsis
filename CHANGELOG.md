@@ -15,13 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Added IMAP credential verification (previously accepted any login)
 * Added `RSET` command support to SMTP server
 * Added Python SMTP client example (`smtp/examples/smtp_client.py`)
-* Added `users.txt` file for test credentials
+* Added `passwords/example.txt` file for test credentials
 * Added unit tests for the SMTP server
 * Added unit tests for `MemoryAuthEngine`
 
 ### Changed
 
 * `AuthEngine::authenticate` now returns `AuthResult<()>` instead of `AuthResult<bool>`, with `AuthError::InvalidCredentials` for wrong password and `AuthError::UserNotFound` for non-existent users
+* `MemoryAuthEngine::from_file` now returns `io::Result<Self>` and fails explicitly when the file cannot be read, instead of silently returning an empty credential store
 * SMTP server now uses `AuthEngine` trait for authentication
 * IMAP server now uses `AuthEngine` trait for authentication
 * SMTP `MAIL FROM` and `RCPT TO` parsing is now case-insensitive (RFC 5321 compliance)

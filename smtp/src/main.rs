@@ -423,7 +423,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&listening).await?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config);
-    let auth_engine = Arc::new(load_credentials("users.txt"));
+    let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
 
     // Spawn a task to handle the email storage, this is a long running
@@ -566,7 +566,7 @@ async fn handle_tls_stream<A: AuthEngine + 'static>(
 /// username:password
 /// username2:password2
 /// ```
-fn load_credentials(path: &str) -> MemoryAuthEngine {
+fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
     MemoryAuthEngine::from_file(path)
 }
 

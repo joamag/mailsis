@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fs::read_to_string;
+use std::io;
 use std::sync::Arc;
 
 /// Result type for authentication operations.
@@ -80,16 +82,17 @@ impl MemoryAuthEngine {
     /// username:password
     /// username2:password2
     /// ```
-    pub fn from_file(path: &str) -> Self {
+    ///
+    /// Returns an error if the file cannot be read.
+    pub fn from_file(path: &str) -> io::Result<Self> {
+        let content = read_to_string(path)?;
         let mut creds = HashMap::new();
-        if let Ok(content) = std::fs::read_to_string(path) {
-            for line in content.lines() {
-                if let Some((user, pass)) = line.split_once(':') {
-                    creds.insert(user.trim().to_string(), pass.trim().to_string());
-                }
+        for line in content.lines() {
+            if let Some((user, pass)) = line.split_once(':') {
+                creds.insert(user.trim().to_string(), pass.trim().to_string());
             }
         }
-        Self::from_map(creds)
+        Ok(Self::from_map(creds))
     }
 
     /// Adds a user to the credential store.
