@@ -107,8 +107,22 @@ impl IMAPSession {
         parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 2 {
-            self.mailbox = Some(parts[1].to_string());
-            let messages = self.search_messages("").await?;
+            let mailbox_name = parts[2].trim_matches('"').to_string();
+            self.mailbox = Some(mailbox_name.clone());
+            let messages = match self.search_messages("").await.ok() {
+                Some(messages) => messages,
+                None => {
+                    self.mailbox = None;
+                    self.write_response(
+                        writer,
+                        tag,
+                        "NO",
+                        &format!("Mailbox \"{}\" does not exist", mailbox_name),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
             self.write_response(writer, "*", "FLAGS", "(\\Seen)")
                 .await?;
             self.write_response(writer, "*", &messages.len().to_string(), "EXISTS")
