@@ -139,7 +139,7 @@ impl AuthEngine for MemoryAuthEngine {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{AuthEngine, AuthError, MemoryAuthEngine};
+    use super::{AuthEngine, AuthError, MemoryAuthEngine};
 
     #[test]
     fn test_memory_engine_new() {

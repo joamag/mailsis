@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::io;
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 use chrono::Utc;
 use tokio::fs::{self, File};
@@ -76,7 +78,13 @@ impl EmailMessage {
         }
     }
 
-    pub fn with_id(message_id: String, from: String, to: String, subject: String, body: String) -> Self {
+    pub fn with_id(
+        message_id: String,
+        from: String,
+        to: String,
+        subject: String,
+        body: String,
+    ) -> Self {
         Self {
             message_id,
             from,
@@ -265,10 +273,118 @@ impl Default for FileStorageEngine {
     }
 }
 
+/// In-memory storage engine.
+///
+/// Stores emails in memory using a HashMap structure.
+/// Useful for testing and development.
+///
+/// Structure: `HashMap<user, HashMap<message_id, EmailMessage>>`
+#[derive(Debug, Default)]
+pub struct MemoryStorageEngine {
+    /// Storage for messages: user -> (message_id -> message)
+    messages: RwLock<HashMap<String, HashMap<String, EmailMessage>>>,
+    /// Storage for mailboxes: user -> list of mailbox names
+    mailboxes: RwLock<HashMap<String, Vec<String>>>,
+}
+
+impl MemoryStorageEngine {
+    /// Creates a new empty MemoryStorageEngine.
+    pub fn new() -> Self {
+        Self {
+            messages: RwLock::new(HashMap::new()),
+            mailboxes: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Returns the number of messages stored for a user.
+    pub fn message_count(&self, user: &str) -> usize {
+        let safe_user = Self::safe_user(user);
+        self.messages
+            .read()
+            .unwrap()
+            .get(&safe_user)
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// Returns the total number of messages stored across all users.
+    pub fn total_message_count(&self) -> usize {
+        self.messages
+            .read()
+            .unwrap()
+            .values()
+            .map(|m| m.len())
+            .sum()
+    }
+
+    /// Clears all messages and mailboxes.
+    pub fn clear(&self) {
+        self.messages.write().unwrap().clear();
+        self.mailboxes.write().unwrap().clear();
+    }
+
+    /// Normalizes a user identifier to a safe key.
+    fn safe_user(user: &str) -> String {
+        user.replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+    }
+}
+
+impl StorageEngine for MemoryStorageEngine {
+    async fn store(&self, message: &EmailMessage) -> StorageResult<String> {
+        let safe_user = Self::safe_user(&message.to);
+        let mut messages = self.messages.write().unwrap();
+        let user_messages = messages.entry(safe_user).or_default();
+        user_messages.insert(message.message_id.clone(), message.clone());
+        Ok(message.message_id.clone())
+    }
+
+    async fn retrieve(&self, user: &str, message_id: &str) -> StorageResult<String> {
+        let safe_user = Self::safe_user(user);
+        let messages = self.messages.read().unwrap();
+        let user_messages = messages.get(&safe_user).ok_or(StorageError::NotFound)?;
+        let message = user_messages
+            .get(message_id)
+            .ok_or(StorageError::NotFound)?;
+        Ok(message.body.clone())
+    }
+
+    async fn list(&self, user: &str) -> StorageResult<Vec<String>> {
+        let safe_user = Self::safe_user(user);
+        let messages = self.messages.read().unwrap();
+        match messages.get(&safe_user) {
+            Some(user_messages) => Ok(user_messages.keys().cloned().collect()),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    async fn delete(&self, user: &str, message_id: &str) -> StorageResult<()> {
+        let safe_user = Self::safe_user(user);
+        let mut messages = self.messages.write().unwrap();
+        let user_messages = messages.get_mut(&safe_user).ok_or(StorageError::NotFound)?;
+        user_messages
+            .remove(message_id)
+            .ok_or(StorageError::NotFound)?;
+        Ok(())
+    }
+
+    async fn create_mailbox(&self, user: &str, mailbox: &str) -> StorageResult<()> {
+        let safe_user = Self::safe_user(user);
+        let mut mailboxes = self.mailboxes.write().unwrap();
+        let user_mailboxes = mailboxes.entry(safe_user).or_default();
+        if !user_mailboxes.contains(&mailbox.to_string()) {
+            user_mailboxes.push(mailbox.to_string());
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::{
+        EmailMessage, FileStorageEngine, MemoryStorageEngine, StorageEngine, StorageError,
+    };
 
     #[tokio::test]
     async fn test_file_storage_store_and_retrieve() {
@@ -282,7 +398,10 @@ mod tests {
         );
 
         let message_id = engine.store(&message).await.unwrap();
-        let content = engine.retrieve("recipient@example.com", &message_id).await.unwrap();
+        let content = engine
+            .retrieve("recipient@example.com", &message_id)
+            .await
+            .unwrap();
 
         assert!(content.contains("Hello, World!"));
         assert!(content.contains("From: sender@example.com"));
@@ -325,9 +444,15 @@ mod tests {
         );
 
         let message_id = engine.store(&message).await.unwrap();
-        assert!(engine.retrieve("recipient@example.com", &message_id).await.is_ok());
+        assert!(engine
+            .retrieve("recipient@example.com", &message_id)
+            .await
+            .is_ok());
 
-        engine.delete("recipient@example.com", &message_id).await.unwrap();
+        engine
+            .delete("recipient@example.com", &message_id)
+            .await
+            .unwrap();
         assert!(matches!(
             engine.retrieve("recipient@example.com", &message_id).await,
             Err(StorageError::NotFound)
@@ -348,7 +473,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let engine = FileStorageEngine::without_metadata(temp_dir.path().to_path_buf());
 
-        engine.create_mailbox("user@example.com", "Drafts").await.unwrap();
+        engine
+            .create_mailbox("user@example.com", "Drafts")
+            .await
+            .unwrap();
 
         let mailbox_path = temp_dir.path().join("user_example_com").join("Drafts.mbox");
         assert!(mailbox_path.exists());
@@ -361,5 +489,242 @@ mod tests {
             StorageError::EngineError("test".to_string()).to_string(),
             "Storage error: test"
         );
+    }
+
+    // MemoryStorageEngine tests
+
+    #[tokio::test]
+    async fn test_memory_storage_new() {
+        let engine = MemoryStorageEngine::new();
+        assert_eq!(engine.total_message_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_store_and_retrieve() {
+        let engine = MemoryStorageEngine::new();
+
+        let message = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Hello, World!".to_string(),
+        );
+
+        let message_id = engine.store(&message).await.unwrap();
+        let content = engine
+            .retrieve("recipient@example.com", &message_id)
+            .await
+            .unwrap();
+
+        assert_eq!(content, "Hello, World!");
+        assert_eq!(engine.message_count("recipient@example.com"), 1);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_store_multiple_users() {
+        let engine = MemoryStorageEngine::new();
+
+        let msg1 = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user1@example.com".to_string(),
+            "Message for user1".to_string(),
+        );
+        let msg2 = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user2@example.com".to_string(),
+            "Message for user2".to_string(),
+        );
+
+        engine.store(&msg1).await.unwrap();
+        engine.store(&msg2).await.unwrap();
+
+        assert_eq!(engine.message_count("user1@example.com"), 1);
+        assert_eq!(engine.message_count("user2@example.com"), 1);
+        assert_eq!(engine.total_message_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_list() {
+        let engine = MemoryStorageEngine::new();
+
+        let msg1 = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user@example.com".to_string(),
+            "Message 1".to_string(),
+        );
+        let msg2 = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user@example.com".to_string(),
+            "Message 2".to_string(),
+        );
+
+        let id1 = engine.store(&msg1).await.unwrap();
+        let id2 = engine.store(&msg2).await.unwrap();
+
+        let messages = engine.list("user@example.com").await.unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(messages.contains(&id1));
+        assert!(messages.contains(&id2));
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_list_empty() {
+        let engine = MemoryStorageEngine::new();
+
+        let messages = engine.list("nonexistent@example.com").await.unwrap();
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_delete() {
+        let engine = MemoryStorageEngine::new();
+
+        let message = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Test message".to_string(),
+        );
+
+        let message_id = engine.store(&message).await.unwrap();
+        assert_eq!(engine.message_count("recipient@example.com"), 1);
+
+        engine
+            .delete("recipient@example.com", &message_id)
+            .await
+            .unwrap();
+        assert_eq!(engine.message_count("recipient@example.com"), 0);
+
+        // Verify retrieve fails after delete
+        assert!(matches!(
+            engine.retrieve("recipient@example.com", &message_id).await,
+            Err(StorageError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_delete_nonexistent() {
+        let engine = MemoryStorageEngine::new();
+
+        // Delete from nonexistent user
+        let result = engine.delete("user@example.com", "fake-id").await;
+        assert!(matches!(result, Err(StorageError::NotFound)));
+
+        // Store a message, then try to delete wrong ID
+        let message = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user@example.com".to_string(),
+            "Test".to_string(),
+        );
+        engine.store(&message).await.unwrap();
+
+        let result = engine.delete("user@example.com", "wrong-id").await;
+        assert!(matches!(result, Err(StorageError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_retrieve_nonexistent() {
+        let engine = MemoryStorageEngine::new();
+
+        // Retrieve from nonexistent user
+        let result = engine.retrieve("user@example.com", "fake-id").await;
+        assert!(matches!(result, Err(StorageError::NotFound)));
+
+        // Store a message, then try to retrieve wrong ID
+        let message = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user@example.com".to_string(),
+            "Test".to_string(),
+        );
+        engine.store(&message).await.unwrap();
+
+        let result = engine.retrieve("user@example.com", "wrong-id").await;
+        assert!(matches!(result, Err(StorageError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_create_mailbox() {
+        let engine = MemoryStorageEngine::new();
+
+        engine
+            .create_mailbox("user@example.com", "Inbox")
+            .await
+            .unwrap();
+        engine
+            .create_mailbox("user@example.com", "Drafts")
+            .await
+            .unwrap();
+
+        // Creating the same mailbox again should not fail
+        engine
+            .create_mailbox("user@example.com", "Inbox")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_clear() {
+        let engine = MemoryStorageEngine::new();
+
+        let msg1 = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user1@example.com".to_string(),
+            "Message 1".to_string(),
+        );
+        let msg2 = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user2@example.com".to_string(),
+            "Message 2".to_string(),
+        );
+
+        engine.store(&msg1).await.unwrap();
+        engine.store(&msg2).await.unwrap();
+        assert_eq!(engine.total_message_count(), 2);
+
+        engine.clear();
+        assert_eq!(engine.total_message_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_with_id() {
+        let engine = MemoryStorageEngine::new();
+
+        let message = EmailMessage::with_id(
+            "custom-id-123".to_string(),
+            "sender@example.com".to_string(),
+            "recipient@example.com".to_string(),
+            "Test Subject".to_string(),
+            "Test body content".to_string(),
+        );
+
+        let message_id = engine.store(&message).await.unwrap();
+        assert_eq!(message_id, "custom-id-123");
+
+        let content = engine
+            .retrieve("recipient@example.com", "custom-id-123")
+            .await
+            .unwrap();
+        assert_eq!(content, "Test body content");
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_special_characters_in_user() {
+        let engine = MemoryStorageEngine::new();
+
+        let message = EmailMessage::new(
+            "sender@example.com".to_string(),
+            "user+tag@example.com".to_string(),
+            "Test message".to_string(),
+        );
+
+        let message_id = engine.store(&message).await.unwrap();
+
+        // Should be able to retrieve with the same user string
+        let content = engine
+            .retrieve("user+tag@example.com", &message_id)
+            .await
+            .unwrap();
+        assert_eq!(content, "Test message");
+
+        // The internal safe_user normalization should handle special chars
+        assert_eq!(engine.message_count("user+tag@example.com"), 1);
     }
 }
