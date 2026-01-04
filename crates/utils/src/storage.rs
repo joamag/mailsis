@@ -146,10 +146,10 @@ pub trait StorageEngine: Send + Sync {
 /// `{base_path}/{user}/{message_id}.eml`
 #[derive(Debug, Clone)]
 pub struct FileStorageEngine {
-    /// Base path for storing email messages, ASCII encoded.
+    /// Base path for storing email messages.
     base_path: PathBuf,
 
-    /// Path to the metadata database, ASCII encoded.
+    /// Path to the metadata database.
     db_path: PathBuf,
 
     /// Whether to store metadata in the database.
