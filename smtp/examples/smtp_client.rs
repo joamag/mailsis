@@ -1,10 +1,11 @@
+use std::{error::Error, path::PathBuf, str::FromStr, time::Instant};
+
 use lettre::{
     message::{header, Message, MultiPart},
     transport::smtp::client::{Certificate, Tls, TlsParameters},
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
 use mailsis_utils::{generate_random_file, get_crate_root, read_large_file};
-use std::{error::Error, path::PathBuf, str::FromStr, time::Instant};
 use tokio::fs::remove_file;
 
 /// Size of the random file in MB

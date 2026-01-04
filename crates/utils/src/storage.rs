@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::io;
-use std::path::PathBuf;
-use std::sync::RwLock;
+use std::{collections::HashMap, fmt::Display, io, path::PathBuf, sync::RwLock};
 
 use chrono::Utc;
-use tokio::fs::{self, File};
-use tokio::io::AsyncWriteExt;
+use tokio::{
+    fs::{self, File},
+    io::AsyncWriteExt,
+};
 use uuid::Uuid;
 
 use crate::{parse_mime_headers, EmailMetadata};

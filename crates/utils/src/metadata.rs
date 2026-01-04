@@ -1,5 +1,7 @@
-use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::{
+    error::Error,
+    path::{Path, PathBuf},
+};
 
 use rusqlite::{params, Connection};
 use tokio::task::spawn_blocking;
@@ -87,8 +89,9 @@ impl EmailMetadata {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::{params, Connection};
     use std::path::PathBuf;
+
+    use rusqlite::{params, Connection};
     use tempfile::NamedTempFile;
 
     use super::EmailMetadata;

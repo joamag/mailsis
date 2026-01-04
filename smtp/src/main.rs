@@ -1,9 +1,10 @@
+use std::{collections::HashSet, error::Error, mem::take, path::PathBuf, str::FromStr, sync::Arc};
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{
     get_crate_root, load_tls_server_config, AuthEngine, EmailMessage, FileStorageEngine,
     MemoryAuthEngine, StorageEngine,
 };
-use std::{collections::HashSet, error::Error, mem::take, path::PathBuf, str::FromStr, sync::Arc};
 use tokio::{
     io::{
         split, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
@@ -572,9 +573,10 @@ fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
     use base64::{engine::general_purpose::STANDARD, Engine};
     use mailsis_utils::MemoryAuthEngine;
-    use std::{collections::HashMap, sync::Arc};
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
 
     use super::SMTPSession;

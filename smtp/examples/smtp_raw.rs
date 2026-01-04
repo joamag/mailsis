@@ -1,6 +1,7 @@
+use std::{env::args, error::Error, path::Path, sync::Arc};
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{generate_random_bytes, load_tls_client_config};
-use std::{env::args, error::Error, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
