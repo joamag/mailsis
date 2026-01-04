@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod exec;
 pub mod file;
 pub mod imap;
@@ -5,6 +6,7 @@ pub mod metadata;
 pub mod mime;
 pub mod tls;
 
+pub use auth::*;
 pub use exec::*;
 pub use file::*;
 pub use imap::*;

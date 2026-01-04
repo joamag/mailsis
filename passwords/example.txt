@@ -1,0 +1,5 @@
+testuser:testpass
+admin:admin123
+user@localhost:password
+recipient@localhost:password
+sender@localhost:password

@@ -1,5 +1,5 @@
-use mailsis_utils::{get_crate_root, uid_fetch_range_str};
-use std::{error::Error, path::PathBuf};
+use mailsis_utils::{get_crate_root, uid_fetch_range_str, AuthEngine, MemoryAuthEngine};
+use std::{error::Error, path::PathBuf, sync::Arc};
 use tokio::{
     fs::{create_dir_all, read_dir, read_to_string},
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -9,27 +9,29 @@ use tokio::{
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 1430;
 
-struct IMAPSession {
+struct IMAPSession<A: AuthEngine> {
     authenticated: bool,
     username: Option<String>,
     mailbox: Option<String>,
     crate_root: PathBuf,
     safe_username: Option<String>,
+    auth_engine: Arc<A>,
 }
 
-impl Default for IMAPSession {
-    fn default() -> Self {
+impl<A: AuthEngine> IMAPSession<A> {
+    fn new(auth_engine: Arc<A>) -> Self {
         Self {
             authenticated: false,
             username: None,
             mailbox: None,
             crate_root: get_crate_root().unwrap_or_else(|_| PathBuf::from(".")),
             safe_username: None,
+            auth_engine,
         }
     }
 }
 
-impl IMAPSession {
+impl<A: AuthEngine> IMAPSession<A> {
     async fn handle_command<R: AsyncRead + AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
         &mut self,
         _reader: &mut R,
@@ -69,14 +71,22 @@ impl IMAPSession {
         parts: &[&str],
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 4 {
-            self.authenticated = true;
-            let username = parts[2].trim_matches('"').to_string();
-            self.safe_username = Some(username.replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
-            self.username = Some(username);
-            self.write_response(writer, tag, "OK", "LOGIN completed")
-                .await?;
+            let username = parts[2].trim_matches('"');
+            let password = parts[3].trim_matches('"');
+
+            if self.auth_engine.authenticate(username, password).is_ok() {
+                self.authenticated = true;
+                self.safe_username =
+                    Some(username.replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
+                self.username = Some(username.to_string());
+                self.write_response(writer, tag, "OK", "LOGIN completed")
+                    .await?;
+            } else {
+                self.write_response(writer, tag, "NO", "Invalid credentials")
+                    .await?;
+            }
         } else {
-            self.write_response(writer, tag, "BAD", "Invalid login")
+            self.write_response(writer, tag, "BAD", "Invalid login syntax")
                 .await?;
         }
         Ok(())
@@ -426,23 +436,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listening = format!("{host}:{port}");
     let listener = TcpListener::bind(&listening).await?;
 
+    let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
+
     println!("Mailsis-IMAP running on {}", &listening);
 
     loop {
         let (stream, _) = listener.accept().await?;
+        let auth_engine = auth_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream).await {
+            if let Err(e) = handle_client(stream, auth_engine).await {
                 eprintln!("Error: {e}");
             }
         });
     }
 }
 
-async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
+async fn handle_client<A: AuthEngine + 'static>(
+    stream: TcpStream,
+    auth_engine: Arc<A>,
+) -> Result<(), Box<dyn Error>> {
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut line = String::new();
-    let mut session = IMAPSession::default();
+    let mut session = IMAPSession::new(auth_engine);
 
     session
         .write_response(&mut w, "*", "OK", "Mailsis IMAP ready")
@@ -472,4 +488,15 @@ async fn handle_client(stream: TcpStream) -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+/// Loads the credentials from the file and returns a MemoryAuthEngine.
+///
+/// The file should be formatted as follows:
+/// ```text
+/// username:password
+/// username2:password2
+/// ```
+fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
+    MemoryAuthEngine::from_file(path)
 }
