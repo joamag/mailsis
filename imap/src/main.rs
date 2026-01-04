@@ -117,7 +117,7 @@ impl IMAPSession {
                         writer,
                         tag,
                         "NO",
-                        &format!("Mailbox \"{}\" does not exist", mailbox_name),
+                        &format!("mailbox \"{}\" does not exist", mailbox_name),
                     )
                     .await?;
                     return Ok(());
