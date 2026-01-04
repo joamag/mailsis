@@ -1,12 +1,13 @@
 use std::ops::RangeInclusive;
 
-/// Converts a string range from an IMAP UID FETCH command to a range of
+/// Convert a string range from an IMAP UID FETCH command into a range of
 /// u32 values.
 ///
-/// The input string should be in the format "start:end", where start and end
-/// are u32 values.
+/// The input string should be in the format `start:end`, where `start` and
+/// `end` are u32 values.
 ///
-/// If only one value is provided, the range will be from 1 to the provided value.
+/// If only one value is provided, the range will be from 1 to the provided
+/// value.
 ///
 /// # Examples
 ///

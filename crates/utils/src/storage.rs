@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, io, path::PathBuf, sync::RwLock};
+use std::{collections::HashMap, error::Error, fmt::Display, io, path::PathBuf, sync::RwLock};
 
 use chrono::Utc;
 use tokio::{
@@ -33,7 +33,7 @@ impl Display for StorageError {
     }
 }
 
-impl std::error::Error for StorageError {}
+impl Error for StorageError {}
 
 impl From<io::Error> for StorageError {
     fn from(e: io::Error) -> Self {

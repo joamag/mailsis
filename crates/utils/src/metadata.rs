@@ -63,7 +63,7 @@ impl EmailMetadata {
     ) -> Result<EmailMetadata, Box<dyn Error + Send + Sync>> {
         let path = db.as_ref().to_path_buf();
 
-        // spawns a blocking task to retrieve the metadata from the database
+        // Spawn a blocking task to retrieve the metadata from the database
         // this is done to avoid blocking the main thread
         spawn_blocking(
             move || -> Result<EmailMetadata, Box<dyn Error + Send + Sync>> {
