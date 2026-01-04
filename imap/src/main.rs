@@ -491,7 +491,7 @@ async fn handle_client<A: AuthEngine + 'static, S: StorageEngine + 'static>(
     Ok(())
 }
 
-/// Load the credentials from the file and return a MemoryAuthEngine.
+/// Loads the credentials from the file and returns a MemoryAuthEngine.
 ///
 /// The file should be formatted as follows:
 /// ```text

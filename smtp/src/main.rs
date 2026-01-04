@@ -34,7 +34,7 @@ struct SMTPSession<A: AuthEngine> {
 }
 
 impl<A: AuthEngine + Default> SMTPSession<A> {
-    /// Create a new SMTP session with default values.
+    /// Creates a new SMTP session with default values.
     pub fn new(auth_engine: Arc<A>, auth_required: bool) -> Self {
         Self {
             auth_required,
@@ -560,7 +560,7 @@ async fn handle_tls_stream<A: AuthEngine + 'static>(
     Ok(())
 }
 
-/// Load the credentials from the file and return a MemoryAuthEngine.
+/// Loads the credentials from the file and return a MemoryAuthEngine.
 ///
 /// The file should be formatted as follows:
 /// ```text
