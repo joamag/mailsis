@@ -35,9 +35,10 @@ impl std::error::Error for AuthError {}
 pub trait AuthEngine: Send + Sync + Default {
     /// Authenticates a user with the given username and password.
     ///
-    /// Returns `Ok(true)` if authentication succeeds, `Ok(false)` if the
-    /// credentials are invalid, or an error if something went wrong.
-    fn authenticate(&self, username: &str, password: &str) -> AuthResult<bool>;
+    /// Returns `Ok(())` if authentication succeeds, or an error if authentication
+    /// fails (`AuthError::InvalidCredentials` for wrong password,
+    /// `AuthError::UserNotFound` for non-existent user).
+    fn authenticate(&self, username: &str, password: &str) -> AuthResult<()>;
 
     /// Checks if a user exists in the authentication store.
     fn user_exists(&self, username: &str) -> AuthResult<bool>;
@@ -118,10 +119,11 @@ impl Default for MemoryAuthEngine {
 }
 
 impl AuthEngine for MemoryAuthEngine {
-    fn authenticate(&self, username: &str, password: &str) -> AuthResult<bool> {
+    fn authenticate(&self, username: &str, password: &str) -> AuthResult<()> {
         match self.credentials.get(username) {
-            Some(stored_password) => Ok(stored_password == password),
-            None => Ok(false),
+            Some(stored_password) if stored_password == password => Ok(()),
+            Some(_) => Err(AuthError::InvalidCredentials),
+            None => Err(AuthError::UserNotFound),
         }
     }
 
@@ -158,7 +160,7 @@ mod tests {
         map.insert("testuser".to_string(), "testpass".to_string());
 
         let engine = MemoryAuthEngine::from_map(map);
-        assert!(engine.authenticate("testuser", "testpass").unwrap());
+        assert!(engine.authenticate("testuser", "testpass").is_ok());
     }
 
     #[test]
@@ -167,13 +169,19 @@ mod tests {
         map.insert("testuser".to_string(), "testpass".to_string());
 
         let engine = MemoryAuthEngine::from_map(map);
-        assert!(!engine.authenticate("testuser", "wrongpass").unwrap());
+        assert_eq!(
+            engine.authenticate("testuser", "wrongpass"),
+            Err(AuthError::InvalidCredentials)
+        );
     }
 
     #[test]
     fn test_memory_engine_authenticate_user_not_found() {
         let engine = MemoryAuthEngine::new();
-        assert!(!engine.authenticate("nonexistent", "pass").unwrap());
+        assert_eq!(
+            engine.authenticate("nonexistent", "pass"),
+            Err(AuthError::UserNotFound)
+        );
     }
 
     #[test]
@@ -191,7 +199,7 @@ mod tests {
         let mut engine = MemoryAuthEngine::new();
         engine.add_user("newuser".to_string(), "newpass".to_string());
 
-        assert!(engine.authenticate("newuser", "newpass").unwrap());
+        assert!(engine.authenticate("newuser", "newpass").is_ok());
         assert_eq!(engine.len(), 1);
     }
 

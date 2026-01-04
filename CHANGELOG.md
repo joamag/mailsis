@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* `AuthEngine::authenticate` now returns `AuthResult<()>` instead of `AuthResult<bool>`, with `AuthError::InvalidCredentials` for wrong password and `AuthError::UserNotFound` for non-existent users
 * SMTP server now uses `AuthEngine` trait for authentication
 * IMAP server now uses `AuthEngine` trait for authentication
 * SMTP `MAIL FROM` and `RCPT TO` parsing is now case-insensitive (RFC 5321 compliance)

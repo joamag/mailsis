@@ -139,7 +139,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         if self
             .auth_engine
             .authenticate(username.trim(), password.trim())
-            .unwrap_or(false)
+            .is_ok()
         {
             self.write_response(writer, 235, "Authentication successful")
                 .await;
@@ -174,7 +174,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         if self
             .auth_engine
             .authenticate(username.trim(), password.trim())
-            .unwrap_or(false)
+            .is_ok()
         {
             self.write_response(writer, 235, "Authentication successful")
                 .await;

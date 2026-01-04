@@ -74,11 +74,7 @@ impl<A: AuthEngine> IMAPSession<A> {
             let username = parts[2].trim_matches('"');
             let password = parts[3].trim_matches('"');
 
-            if self
-                .auth_engine
-                .authenticate(username, password)
-                .unwrap_or(false)
-            {
+            if self.auth_engine.authenticate(username, password).is_ok() {
                 self.authenticated = true;
                 self.safe_username =
                     Some(username.replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
