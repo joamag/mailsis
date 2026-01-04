@@ -96,6 +96,9 @@ impl SMTPSession {
             "DATA" => {
                 self.handle_data(reader, writer, tx).await?;
             }
+            "RSET" => {
+                self.handle_rset(writer).await?;
+            }
             "QUIT" => {
                 self.handle_quit(writer).await?;
             }
@@ -191,15 +194,20 @@ impl SMTPSession {
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
                 .await;
+            return Ok(());
         }
 
-        if let Some(value) = value.strip_prefix("FROM:") {
+        // SMTP is case-insensitive, convert to uppercase for prefix matching
+        let value_upper = value.to_uppercase();
+        if value_upper.starts_with("FROM:") {
+            // Use the length of "FROM:" to get the original case value
+            let original_rest = &value[5..];
             // Sanitize the from address, removing the prefix and suffix <>
-            self.from = value
+            self.from = original_rest
                 .trim()
                 .strip_prefix("<")
                 .and_then(|s| s.strip_suffix(">"))
-                .unwrap()
+                .unwrap_or(original_rest.trim())
                 .to_string();
             self.write_response(writer, 250, "OK").await;
         } else {
@@ -221,14 +229,16 @@ impl SMTPSession {
             return Ok(());
         }
 
-        // Check if the value is a valid email address, if so, add it to the
-        // rcpts set and write a 250 response, otherwise write a 501 response
-        if let Some(value) = value.strip_prefix("TO:") {
-            let rcpt = value
+        // SMTP is case-insensitive, convert to uppercase for prefix matching
+        let value_upper = value.to_uppercase();
+        if value_upper.starts_with("TO:") {
+            // Use the length of "TO:" to get the original case value
+            let original_rest = &value[3..];
+            let rcpt = original_rest
                 .trim()
                 .strip_prefix("<")
                 .and_then(|s| s.strip_suffix(">"))
-                .unwrap()
+                .unwrap_or(original_rest.trim())
                 .to_string();
             self.rcpts.insert(rcpt);
             self.write_response(writer, 250, "OK").await;
@@ -295,6 +305,16 @@ impl SMTPSession {
         tx.send((from, rcpts, data)).await?;
         self.write_response(writer, 250, "Message accepted").await;
 
+        Ok(())
+    }
+
+    async fn handle_rset<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut W,
+    ) -> Result<(), Box<dyn Error>> {
+        self.from.clear();
+        self.rcpts.clear();
+        self.write_response(writer, 250, "OK").await;
         Ok(())
     }
 
