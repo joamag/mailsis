@@ -1,5 +1,5 @@
 use mailsis_utils::{get_crate_root, uid_fetch_range_str};
-use std::{error::Error, path::PathBuf, str::FromStr};
+use std::{error::Error, path::PathBuf};
 use tokio::{
     fs::{create_dir_all, read_dir, read_to_string},
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -9,11 +9,24 @@ use tokio::{
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 1430;
 
-#[derive(Default)]
 struct IMAPSession {
     authenticated: bool,
     username: Option<String>,
     mailbox: Option<String>,
+    crate_root: PathBuf,
+    safe_username: Option<String>,
+}
+
+impl Default for IMAPSession {
+    fn default() -> Self {
+        Self {
+            authenticated: false,
+            username: None,
+            mailbox: None,
+            crate_root: get_crate_root().unwrap_or_else(|_| PathBuf::from(".")),
+            safe_username: None,
+        }
+    }
 }
 
 impl IMAPSession {
@@ -57,7 +70,9 @@ impl IMAPSession {
     ) -> Result<(), Box<dyn Error>> {
         if parts.len() >= 4 {
             self.authenticated = true;
-            self.username = Some(parts[2].trim_matches('"').to_string());
+            let username = parts[2].trim_matches('"').to_string();
+            self.safe_username = Some(username.replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
+            self.username = Some(username);
             self.write_response(writer, tag, "OK", "LOGIN completed")
                 .await?;
         } else {
@@ -75,6 +90,7 @@ impl IMAPSession {
         self.authenticated = false;
         self.username = None;
         self.mailbox = None;
+        self.safe_username = None;
         self.write_response(writer, tag, "OK", "LOGOUT completed")
             .await?;
         Ok(())
@@ -392,15 +408,11 @@ impl IMAPSession {
     }
 
     fn mailbox_path(&self) -> PathBuf {
-        let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
-        crate_root.join("mailbox").join(self.safe_username())
+        self.crate_root.join("mailbox").join(self.safe_username())
     }
 
-    fn safe_username(&self) -> String {
-        self.username
-            .as_deref()
-            .unwrap_or_default()
-            .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+    fn safe_username(&self) -> &str {
+        self.safe_username.as_deref().unwrap_or("")
     }
 }
 

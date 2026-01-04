@@ -8,7 +8,7 @@ use std::{
     error::Error,
     mem::take,
     path::PathBuf,
-    str::{FromStr, SplitWhitespace},
+    str::FromStr,
     sync::Arc,
 };
 use tokio::{
@@ -142,7 +142,7 @@ impl SMTPSession {
         let password = STANDARD.decode(line.trim()).unwrap_or_default();
         let password = String::from_utf8_lossy(&password);
 
-        if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
+        if self.credentials.get(username.trim()).map(|p| p.as_str()) == Some(password.trim()) {
             self.write_response(writer, 235, "Authentication successful")
                 .await;
             self.authenticated = true;
@@ -173,7 +173,7 @@ impl SMTPSession {
         let password = STANDARD.decode(line.trim()).unwrap_or_default();
         let password = String::from_utf8_lossy(&password);
 
-        if self.credentials.get(username.trim()) == Some(&password.trim().to_string()) {
+        if self.credentials.get(username.trim()).map(|p| p.as_str()) == Some(password.trim()) {
             self.write_response(writer, 235, "Authentication successful")
                 .await;
             self.authenticated = true;
@@ -197,12 +197,10 @@ impl SMTPSession {
             return Ok(());
         }
 
-        // SMTP is case-insensitive, convert to uppercase for prefix matching
-        let value_upper = value.to_uppercase();
-        if value_upper.starts_with("FROM:") {
-            // Use the length of "FROM:" to get the original case value
-            let original_rest = &value[5..];
+        // SMTP is case-insensitive, check prefix without allocation
+        if value.len() >= 5 && value[..5].eq_ignore_ascii_case("FROM:") {
             // Sanitize the from address, removing the prefix and suffix <>
+            let original_rest = &value[5..];
             self.from = original_rest
                 .trim()
                 .strip_prefix("<")
@@ -229,10 +227,8 @@ impl SMTPSession {
             return Ok(());
         }
 
-        // SMTP is case-insensitive, convert to uppercase for prefix matching
-        let value_upper = value.to_uppercase();
-        if value_upper.starts_with("TO:") {
-            // Use the length of "TO:" to get the original case value
+        // SMTP is case-insensitive, check prefix without allocation
+        if value.len() >= 3 && value[..3].eq_ignore_ascii_case("TO:") {
             let original_rest = &value[3..];
             let rcpt = original_rest
                 .trim()
@@ -270,26 +266,31 @@ impl SMTPSession {
         self.write_response(writer, 354, "End data with <CR><LF>.<CR><LF>")
             .await;
 
-        let mut buffer = [0u8; 4096];
-        let mut buffer_data = Vec::<u8>::new();
-        let mut last_bytes = Vec::<u8>::with_capacity(5);
+        let mut buffer = [0u8; 8192];
+        let mut buffer_data = Vec::<u8>::with_capacity(64 * 1024); // Pre-allocate 64KB for typical emails
+        let mut last_bytes = [0u8; 5];
+        let mut last_bytes_len = 0usize;
 
         loop {
             match reader.read(&mut buffer).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Read the chunk of data from the reader and append it
-                    // to the `buffer_data` vector
                     let chunk = &buffer[..n];
                     buffer_data.extend_from_slice(chunk);
 
-                    // Add new bytes to sliding window, and then check if the last
-                    // 5 bytes are the pre-agreed termination sequence
-                    last_bytes.extend_from_slice(chunk);
-                    if last_bytes.len() > 5 {
-                        last_bytes.drain(0..last_bytes.len() - 5);
+                    // Update sliding window with new bytes (fixed-size array, no allocation)
+                    for &byte in chunk {
+                        if last_bytes_len < 5 {
+                            last_bytes[last_bytes_len] = byte;
+                            last_bytes_len += 1;
+                        } else {
+                            last_bytes.rotate_left(1);
+                            last_bytes[4] = byte;
+                        }
                     }
-                    if last_bytes.ends_with(b"\r\n.\r\n") {
+
+                    // Check for termination sequence
+                    if last_bytes_len == 5 && &last_bytes == b"\r\n.\r\n" {
                         buffer_data.truncate(buffer_data.len() - 5);
                         break;
                     }
@@ -339,18 +340,15 @@ impl SMTPSession {
         &mut self,
         reader: &mut R,
         line: &mut String,
-    ) -> (String, String, Option<String>) {
+    ) -> (String, Option<String>) {
         line.clear();
-
         reader.read_line(line).await.unwrap_or(0);
 
-        let line_clone = line.clone();
+        let mut parts = line.split_whitespace();
+        let command = parts.next().unwrap_or("").to_uppercase();
+        let argument = parts.next().map(|arg| arg.to_string());
 
-        let mut parts: SplitWhitespace<'_> = line.split_whitespace();
-        let command = parts.next().unwrap_or("").trim_end().to_uppercase();
-        let argument = parts.next().map(|arg| arg.trim_end().to_string());
-
-        (line_clone, command, argument)
+        (command, argument)
     }
 
     async fn write_inner<W: AsyncWrite + Unpin>(
@@ -486,7 +484,7 @@ async fn handle_stream(
         .await;
 
     loop {
-        let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
+        let (command, argument) = session.read_command(&mut reader, &mut line).await;
         if line.is_empty() {
             break;
         }
@@ -538,7 +536,7 @@ async fn handle_tls_stream(
     let mut line = String::with_capacity(4096);
 
     loop {
-        let (_, command, argument) = session.read_command(&mut reader, &mut line).await;
+        let (command, argument) = session.read_command(&mut reader, &mut line).await;
         if line.is_empty() {
             break;
         }
