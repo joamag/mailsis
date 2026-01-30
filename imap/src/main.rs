@@ -423,6 +423,10 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
     }
 }
 
+/// The main entry point of the Mailsis IMAP server.
+///
+/// It initializes the server, listens for incoming connections,
+/// and spawns a new task to handle each client.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let crate_root = get_crate_root().unwrap_or_else(|_| PathBuf::from("."));

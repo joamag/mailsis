@@ -394,7 +394,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
     }
 }
 
-/// Main function for the SMTP server.
+/// Main function for the Mailsis SMTP server.
 ///
 /// It will listen for incoming connections on the specified port and handle them
 /// using the [`handle_smtp_session`] function.
