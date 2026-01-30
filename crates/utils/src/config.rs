@@ -416,4 +416,66 @@ handler = "local"
         assert_eq!(config.smtp.tls.key, "certs/server.key.pem");
         assert_eq!(config.smtp.auth.credentials_file, "passwords/example.txt");
     }
+
+    #[test]
+    fn test_config_error_display_io() {
+        let error = ConfigError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file missing",
+        ));
+        assert!(error.to_string().starts_with("Config I/O error:"));
+    }
+
+    #[test]
+    fn test_config_error_display_parse() {
+        let toml_err = toml::from_str::<Config>("invalid toml {{{{").unwrap_err();
+        let error = ConfigError::Parse(toml_err);
+        assert!(error.to_string().starts_with("Config parse error:"));
+    }
+
+    #[test]
+    fn test_load_config_success() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        std::fs::write(&config_path, "[smtp]\nhost = \"0.0.0.0\"\nport = 25\n").unwrap();
+
+        let config = load_config(&config_path).unwrap();
+        assert_eq!(config.smtp.host, "0.0.0.0");
+        assert_eq!(config.smtp.port, 25);
+    }
+
+    #[test]
+    fn test_load_config_file_not_found() {
+        let result = load_config(Path::new("/nonexistent/config.toml"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_config_invalid_toml() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("bad.toml");
+        std::fs::write(&config_path, "this is not valid {{{{ toml").unwrap();
+
+        let result = load_config(&config_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_email_auth_transformer() {
+        let toml = r#"
+[smtp]
+
+[[smtp.routing.transformers]]
+type = "email_auth"
+authserv_id = "mx.example.com"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.smtp.routing.transformers.len(), 1);
+        match &config.smtp.routing.transformers[0] {
+            TransformerConfig::EmailAuth { authserv_id } => {
+                assert_eq!(authserv_id, "mx.example.com");
+            }
+            _ => panic!("Expected EmailAuth transformer"),
+        }
+    }
 }

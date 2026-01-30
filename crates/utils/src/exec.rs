@@ -27,3 +27,22 @@ pub fn get_crate_root() -> Result<PathBuf, Box<dyn Error>> {
 
     Ok(crate_root)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_crate_root_returns_path() {
+        let result = get_crate_root();
+        assert!(result.is_ok());
+        let root = result.unwrap();
+        assert!(root.exists());
+    }
+
+    #[test]
+    fn test_get_crate_root_not_inside_target() {
+        let root = get_crate_root().unwrap();
+        assert!(!root.ends_with("target"));
+    }
+}

@@ -212,4 +212,72 @@ mod tests {
             "Engine error: test error"
         );
     }
+
+    #[test]
+    fn test_memory_engine_from_arc() {
+        let mut map = HashMap::new();
+        map.insert("user".to_string(), "pass".to_string());
+        let arc = Arc::new(map);
+
+        let engine = MemoryAuthEngine::from_arc(arc.clone());
+        assert_eq!(engine.len(), 1);
+        assert!(engine.authenticate("user", "pass").is_ok());
+    }
+
+    #[test]
+    fn test_memory_engine_from_file() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("credentials.txt");
+        std::fs::write(&file_path, "alice:secret\nbob:password123\n").unwrap();
+
+        let engine = MemoryAuthEngine::from_file(file_path.to_str().unwrap()).unwrap();
+        assert_eq!(engine.len(), 2);
+        assert!(engine.authenticate("alice", "secret").is_ok());
+        assert!(engine.authenticate("bob", "password123").is_ok());
+    }
+
+    #[test]
+    fn test_memory_engine_from_file_not_found() {
+        let result = MemoryAuthEngine::from_file("/nonexistent/credentials.txt");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_engine_from_file_with_whitespace() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("creds.txt");
+        std::fs::write(&file_path, " alice : secret \n bob : pass \n").unwrap();
+
+        let engine = MemoryAuthEngine::from_file(file_path.to_str().unwrap()).unwrap();
+        assert!(engine.authenticate("alice", "secret").is_ok());
+        assert!(engine.authenticate("bob", "pass").is_ok());
+    }
+
+    #[test]
+    fn test_memory_engine_from_file_empty() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("empty.txt");
+        std::fs::write(&file_path, "").unwrap();
+
+        let engine = MemoryAuthEngine::from_file(file_path.to_str().unwrap()).unwrap();
+        assert!(engine.is_empty());
+    }
+
+    #[test]
+    fn test_memory_engine_default() {
+        let engine = MemoryAuthEngine::default();
+        assert!(engine.is_empty());
+        assert_eq!(engine.len(), 0);
+    }
+
+    #[test]
+    fn test_memory_engine_len_and_is_empty() {
+        let mut engine = MemoryAuthEngine::new();
+        assert!(engine.is_empty());
+        assert_eq!(engine.len(), 0);
+
+        engine.add_user("user".to_string(), "pass".to_string());
+        assert!(!engine.is_empty());
+        assert_eq!(engine.len(), 1);
+    }
 }

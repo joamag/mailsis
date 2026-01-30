@@ -129,3 +129,145 @@ pub fn parse_raw_headers(raw: &str) -> (Vec<(String, String)>, &str) {
 
     (headers, &raw[pos..])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_mime_valid_with_mime_version() {
+        assert!(is_mime_valid(
+            "MIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nBody"
+        ));
+    }
+
+    #[test]
+    fn test_is_mime_valid_without_mime_version() {
+        assert!(!is_mime_valid("Subject: Hello\r\n\r\nBody"));
+    }
+
+    #[test]
+    fn test_is_mime_valid_mime_in_body_only() {
+        assert!(!is_mime_valid("Subject: Hello\r\n\r\nMIME-Version: 1.0"));
+    }
+
+    #[test]
+    fn test_is_mime_valid_empty_input() {
+        assert!(!is_mime_valid(""));
+    }
+
+    #[test]
+    fn test_is_mime_valid_no_headers() {
+        assert!(!is_mime_valid("Plain text without headers"));
+    }
+
+    #[test]
+    fn test_is_mime_valid_mime_version_among_headers() {
+        assert!(is_mime_valid(
+            "From: a@b.com\r\nMIME-Version: 1.0\r\nTo: c@d.com\r\n\r\nBody"
+        ));
+    }
+
+    #[test]
+    fn test_parse_mime_headers_basic() {
+        let headers =
+            parse_mime_headers("From: test@example.com\r\nTo: test@example.com\r\n").unwrap();
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers["From"], "test@example.com");
+        assert_eq!(headers["To"], "test@example.com");
+    }
+
+    #[test]
+    fn test_parse_mime_headers_with_body() {
+        let headers =
+            parse_mime_headers("From: a@b.com\r\nSubject: Test\r\n\r\nBody content here").unwrap();
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers["Subject"], "Test");
+        assert!(!headers.contains_key("Body content here"));
+    }
+
+    #[test]
+    fn test_parse_mime_headers_empty_input() {
+        let headers = parse_mime_headers("").unwrap();
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn test_parse_mime_headers_no_headers() {
+        let headers = parse_mime_headers("\r\nBody only").unwrap();
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn test_parse_mime_headers_duplicate_keys() {
+        let headers = parse_mime_headers("X-Custom: first\r\nX-Custom: second\r\n").unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers["X-Custom"], "second");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_basic() {
+        let (headers, content) =
+            parse_raw_headers("From: alice@example.com\r\nTo: bob@example.com\r\n\r\nHello!");
+        assert_eq!(headers.len(), 2);
+        assert_eq!(
+            headers[0],
+            ("From".to_string(), "alice@example.com".to_string())
+        );
+        assert_eq!(
+            headers[1],
+            ("To".to_string(), "bob@example.com".to_string())
+        );
+        assert_eq!(content, "Hello!");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_preserves_order() {
+        let (headers, _) = parse_raw_headers("Z-Last: z\r\nA-First: a\r\nM-Middle: m\r\n\r\nBody");
+        assert_eq!(headers[0].0, "Z-Last");
+        assert_eq!(headers[1].0, "A-First");
+        assert_eq!(headers[2].0, "M-Middle");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_duplicate_headers() {
+        let (headers, _) = parse_raw_headers("Received: first\r\nReceived: second\r\n\r\nBody");
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].1, "first");
+        assert_eq!(headers[1].1, "second");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_empty_input() {
+        let (headers, content) = parse_raw_headers("");
+        assert!(headers.is_empty());
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_no_headers() {
+        let (headers, content) = parse_raw_headers("Plain text body");
+        assert!(headers.is_empty());
+        assert_eq!(content, "Plain text body");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_empty_body() {
+        let (headers, content) = parse_raw_headers("Subject: Test\r\n\r\n");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_lf_line_endings() {
+        let (headers, content) = parse_raw_headers("From: a@b.com\nTo: c@d.com\n\nBody");
+        assert_eq!(headers.len(), 2);
+        assert_eq!(content, "Body");
+    }
+
+    #[test]
+    fn test_parse_raw_headers_trims_values() {
+        let (headers, _) = parse_raw_headers("Subject:  spaced value  \r\n\r\nBody");
+        assert_eq!(headers[0].1, "spaced value");
+    }
+}

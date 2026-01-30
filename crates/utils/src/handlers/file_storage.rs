@@ -1,3 +1,9 @@
+//! Filesystem-backed message handler.
+//!
+//! Provides [`FileStorageHandler`], a [`MessageHandler`](crate::MessageHandler)
+//! implementation that delegates to a [`FileStorageEngine`](crate::FileStorageEngine)
+//! for storing emails as `.eml` files on disk.
+
 use std::{path::PathBuf, sync::Arc};
 
 use tracing::{debug, error, info};
@@ -85,5 +91,56 @@ mod tests {
         // Verify the file was stored
         let messages = handler.engine.list("rcpt@example.com").await.unwrap();
         assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn test_file_storage_handler_name() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FileStorageHandler::new(temp_dir.path().to_path_buf(), false);
+        assert_eq!(handler.name(), "file_storage");
+    }
+
+    #[test]
+    fn test_file_storage_handler_engine_accessor() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FileStorageHandler::new(temp_dir.path().to_path_buf(), false);
+        let _engine = handler.engine();
+    }
+
+    #[tokio::test]
+    async fn test_file_storage_handler_multiple_messages() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FileStorageHandler::new(temp_dir.path().to_path_buf(), false);
+
+        let msg1 = EmailMessage::from_raw("sender@example.com", "rcpt@example.com", "Message 1");
+        let msg2 = EmailMessage::from_raw("sender@example.com", "rcpt@example.com", "Message 2");
+
+        handler.handle(&msg1).await.unwrap();
+        handler.handle(&msg2).await.unwrap();
+
+        let messages = handler.engine.list("rcpt@example.com").await.unwrap();
+        assert_eq!(messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_file_storage_handler_with_mime_message() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FileStorageHandler::new(temp_dir.path().to_path_buf(), false);
+
+        let message = EmailMessage::from_raw(
+            "sender@example.com",
+            "rcpt@example.com",
+            "Subject: Test\r\nFrom: sender@example.com\r\n\r\nBody content",
+        );
+
+        handler.handle(&message).await.unwrap();
+
+        let content = handler
+            .engine
+            .retrieve("rcpt@example.com", &message.message_id)
+            .await
+            .unwrap();
+        assert!(content.contains("Subject: Test"));
+        assert!(content.contains("Body content"));
     }
 }
