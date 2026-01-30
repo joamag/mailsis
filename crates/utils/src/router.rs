@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     handler::{HandlerResult, MessageHandler},
-    transformer::{apply_transformers, MessageTransformer},
+    transformer::MessageTransformer,
     EmailMessage,
 };
 
@@ -73,7 +73,7 @@ impl std::fmt::Debug for MessageRouter {
 }
 
 impl MessageRouter {
-    /// Creates a new `MessageRouter` with the given rules, default handler, and
+    /// Creates a new [`MessageRouter`] with the given rules, default handler, and
     /// default transformers.
     ///
     /// Rules are automatically sorted by specificity (exact > domain > wildcard).
@@ -126,7 +126,7 @@ impl MessageRouter {
     /// Applies transformers before dispatching to the handler.
     pub async fn route(&self, message: &mut EmailMessage) -> HandlerResult<()> {
         let transformers = self.resolve_transformers(&message.to);
-        apply_transformers(transformers, message);
+        <crate::MessageIdTransformer as MessageTransformer>::apply(transformers, message).await;
 
         let handler = self.resolve(&message.to);
         handler.handle(message).await
@@ -134,7 +134,7 @@ impl MessageRouter {
 
     /// Resolves whether authentication is required for a recipient.
     ///
-    /// Returns the rule's `auth_required` if the matching rule defines it,
+    /// Returns the rule's [`RoutingRule::auth_required`] if the matching rule defines it,
     /// otherwise returns the provided global default.
     pub fn resolve_auth_required(&self, recipient: &str, global_default: bool) -> bool {
         for rule in &self.rules {
@@ -156,9 +156,9 @@ impl MessageRouter {
 
 /// Determines the match type from a routing rule configuration.
 ///
-/// Returns `ExactAddress` if an address field is present,
-/// `WildcardDomain` if the domain starts with `*.`,
-/// or `Domain` otherwise.
+/// Returns [`ExactAddress`](MatchType::ExactAddress) if an address field is present,
+/// [`WildcardDomain`](MatchType::WildcardDomain) if the domain starts with `*.`,
+/// or [`Domain`](MatchType::Domain) otherwise.
 pub fn determine_match_type(address: &Option<String>, domain: &Option<String>) -> MatchType {
     if address.is_some() {
         MatchType::ExactAddress
@@ -187,7 +187,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::handler::{HandlerFuture, MessageHandler};
+    use crate::handler::HandlerFuture;
 
     struct CountingHandler {
         name: &'static str,

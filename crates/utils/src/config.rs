@@ -14,6 +14,9 @@ pub struct SmtpConfig {
     #[serde(default = "default_host")]
     pub host: String,
 
+    #[serde(default = "default_hostname")]
+    pub hostname: String,
+
     #[serde(default = "default_port")]
     pub port: u16,
 
@@ -148,6 +151,15 @@ pub enum TransformerConfig {
         #[serde(default = "default_host")]
         domain: String,
     },
+
+    /// Verifies SPF, DKIM, and DMARC; adds an Authentication-Results header.
+    #[serde(rename = "email_auth")]
+    EmailAuth {
+        /// The authserv-id for the Authentication-Results header.
+        /// Defaults to the global `hostname` if not specified.
+        #[serde(default)]
+        authserv_id: String,
+    },
 }
 
 /// Loads configuration from a TOML file.
@@ -178,6 +190,10 @@ impl std::error::Error for ConfigError {}
 
 fn default_host() -> String {
     "127.0.0.1".to_string()
+}
+
+fn default_hostname() -> String {
+    "localhost".to_string()
 }
 
 fn default_port() -> u16 {
@@ -345,6 +361,7 @@ handler = "local"
             TransformerConfig::MessageId { domain } => {
                 assert_eq!(domain, "mail.example.com");
             }
+            _ => panic!("Expected MessageId transformer"),
         }
 
         // Per-rule transformers
@@ -355,6 +372,7 @@ handler = "local"
             TransformerConfig::MessageId { domain } => {
                 assert_eq!(domain, "example.com");
             }
+            _ => panic!("Expected MessageId transformer"),
         }
 
         // Rule without transformers

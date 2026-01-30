@@ -8,6 +8,7 @@
 [smtp]
 host = "127.0.0.1"             # Address to bind
 port = 2525                    # Port to listen on
+hostname = "localhost"         # Server hostname (used in Authentication-Results, etc.)
 auth_required = false          # Require AUTH before MAIL FROM (global default)
 
 # -- TLS ------------------------------------------------------------
@@ -66,10 +67,16 @@ default = "local"
 #
 # Available types:
 #   message_id   Ensures a Message-ID header exists; syncs or injects one
+#   email_auth   Verifies SPF, DKIM, and DMARC; adds Authentication-Results header
+#                (requires: cargo build --features email-auth)
 
 # [[smtp.routing.transformers]]
 # type = "message_id"
 # domain = "example.com"
+
+# [[smtp.routing.transformers]]
+# type = "email_auth"
+# authserv_id = "mail.example.com"    # Defaults to smtp.hostname if omitted
 
 # -- Routing Rules --------------------------------------------------
 

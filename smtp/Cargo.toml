@@ -12,6 +12,7 @@ rust-version = "1.83"
 [features]
 default = []
 redis = ["mailsis-utils/redis"]
+email-auth = ["mailsis-utils/email-auth"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

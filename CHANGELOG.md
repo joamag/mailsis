@@ -13,9 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Added `MessageRouter::resolve_auth_required()` for recipient-based auth resolution with global fallback
 * Added `MessageTransformer` trait for pluggable email transformation pipeline
 * Added `MessageIdTransformer` that injects or syncs RFC 5322 `Message-ID` headers
+* Added `EmailAuthTransformer` for SPF, DKIM, and DMARC verification with `Authentication-Results` header injection
 * Added `TransformerConfig` enum for TOML-based transformer configuration
 * Added per-rule transformer overrides in routing configuration (rule-level transformers override defaults)
 * Added default transformers in `RoutingConfig` applied to all routed messages
+* Added `IncomingMessage` struct for SMTP DATA aggregation with multi-recipient support
+* Added `parse_raw_headers()` function for ordered header extraction from raw email
 * Added structured logging with `tracing` and `tracing-subscriber` (env-filter support via `RUST_LOG`)
 * Added detailed SMTP session logging: connection lifecycle, authentication, envelope (MAIL FROM/RCPT TO/DATA), routing dispatch, and handler registration
 * Added internal logging to `FileStorageHandler` and `RedisQueueHandler` (initialization, success, errors)
@@ -48,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* Restructured `EmailMessage` with structured headers (`Vec<(String, String)>`), separate `body` (RFC 5322 body), cached `raw` serialization, and immutable `original_raw` for DKIM verification
+* Renamed `EmailMessage.body` field to `raw()` method and added `body()` for RFC 5322 body content after headers
+* Moved `FileStorageHandler` from `handler.rs` to `handlers/file_storage.rs` module
+* Moved `EmailAuthTransformer` and `MessageIdTransformer` into `transformers/` submodule
+* `MessageTransformer::apply()` is now a static trait method that calls `rebuild()` once after all transformers run
 * Replaced `println!`/`eprintln!` with structured `tracing` macros (`info!`, `debug!`, `warn!`, `error!`) in both SMTP and IMAP servers
 * `AuthEngine::authenticate` now returns `AuthResult<()>` instead of `AuthResult<bool>`, with `AuthError::InvalidCredentials` for wrong password and `AuthError::UserNotFound` for non-existent users
 * `MemoryAuthEngine::from_file` now returns `io::Result<Self>` and fails explicitly when the file cannot be read, instead of silently returning an empty credential store

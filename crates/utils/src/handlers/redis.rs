@@ -13,7 +13,7 @@ struct RedisEmailMessage<'a> {
     from: &'a str,
     to: &'a str,
     subject: &'a str,
-    body: &'a str,
+    raw: &'a str,
 }
 
 impl<'a> From<&'a EmailMessage> for RedisEmailMessage<'a> {
@@ -22,8 +22,8 @@ impl<'a> From<&'a EmailMessage> for RedisEmailMessage<'a> {
             message_id: &msg.message_id,
             from: &msg.from,
             to: &msg.to,
-            subject: &msg.subject,
-            body: &msg.body,
+            subject: msg.subject(),
+            raw: msg.raw(),
         }
     }
 }
@@ -35,7 +35,7 @@ pub struct RedisQueueHandler {
 }
 
 impl RedisQueueHandler {
-    /// Creates a new `RedisQueueHandler` with the given Redis URL and queue name.
+    /// Creates a new [`RedisQueueHandler`] with the given Redis URL and queue name.
     pub fn new(url: &str, queue: String) -> Result<Self, HandlerError> {
         let client = redis::Client::open(url).map_err(|e| {
             error!(url = %url, error = %e, "Failed to create Redis client");

@@ -133,9 +133,7 @@ impl AuthEngine for MemoryAuthEngine {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use super::{AuthEngine, AuthError, MemoryAuthEngine};
+    use super::*;
 
     #[test]
     fn test_memory_engine_new() {

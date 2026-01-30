@@ -11,13 +11,13 @@ pub mod router;
 pub mod storage;
 pub mod tls;
 pub mod transformer;
+pub mod transformers;
 
 pub use auth::*;
 pub use config::*;
 pub use exec::*;
 pub use file::*;
 pub use handler::*;
-#[cfg(feature = "redis")]
 pub use handlers::*;
 pub use imap::*;
 pub use metadata::*;
@@ -26,3 +26,4 @@ pub use router::*;
 pub use storage::*;
 pub use tls::*;
 pub use transformer::*;
+pub use transformers::*;

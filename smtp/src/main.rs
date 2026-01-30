@@ -1,10 +1,14 @@
-use std::{collections::HashSet, error::Error, mem::take, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    collections::HashSet, error::Error, mem::take, net::IpAddr, path::PathBuf, str::FromStr,
+    sync::Arc,
+};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{
     determine_match_type, extract_pattern, get_crate_root, load_config, load_tls_server_config,
-    AuthEngine, EmailMessage, FileStorageHandler, HandlerConfig, MemoryAuthEngine, MessageHandler,
-    MessageIdTransformer, MessageRouter, MessageTransformer, RoutingRule, TransformerConfig,
+    AuthEngine, FileStorageHandler, HandlerConfig, IncomingMessage, MemoryAuthEngine,
+    MessageHandler, MessageIdTransformer, MessageRouter, MessageTransformer, RoutingRule,
+    TransformerConfig,
 };
 use tokio::{
     io::{
@@ -31,11 +35,18 @@ struct SMTPSession<A: AuthEngine> {
     starttls: bool,
     auth_engine: Arc<A>,
     router: Arc<MessageRouter>,
+    client_ip: Option<IpAddr>,
+    helo_domain: Option<String>,
 }
 
 impl<A: AuthEngine + Default> SMTPSession<A> {
     /// Creates a new SMTP session with default values.
-    pub fn new(auth_engine: Arc<A>, auth_required: bool, router: Arc<MessageRouter>) -> Self {
+    pub fn new(
+        auth_engine: Arc<A>,
+        auth_required: bool,
+        router: Arc<MessageRouter>,
+        client_ip: Option<IpAddr>,
+    ) -> Self {
         Self {
             from: String::new(),
             rcpts: HashSet::new(),
@@ -44,6 +55,8 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
             starttls: false,
             auth_engine,
             router,
+            client_ip,
+            helo_domain: None,
         }
     }
 
@@ -53,13 +66,14 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         &mut self,
         reader: &mut R,
         writer: &mut W,
-        tx: &mpsc::Sender<(String, HashSet<String>, String)>,
+        tx: &mpsc::Sender<IncomingMessage>,
         line: &mut String,
         command: &str,
         arg: Option<&str>,
     ) -> Result<(), Box<dyn Error>> {
         match command {
             "EHLO" | "HELO" => {
+                self.helo_domain = arg.map(|s| s.to_string());
                 self.handle_ehlo_helo(writer).await?;
             }
             "AUTH" if arg == Some("LOGIN") => {
@@ -264,7 +278,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         &mut self,
         reader: &mut R,
         writer: &mut W,
-        tx: &mpsc::Sender<(String, HashSet<String>, String)>,
+        tx: &mpsc::Sender<IncomingMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if !self.authenticated && self.auth_required {
             self.write_response(writer, 530, "Authentication required")
@@ -324,7 +338,14 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
             "Message received"
         );
 
-        tx.send((from, rcpts, data)).await?;
+        tx.send(IncomingMessage {
+            from,
+            rcpts,
+            raw: data,
+            client_ip: self.client_ip,
+            helo_domain: self.helo_domain.clone(),
+        })
+        .await?;
         self.write_response(writer, 250, "Message accepted").await;
 
         Ok(())
@@ -419,7 +440,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
 /// Builds a message router from the SMTP configuration.
 ///
 /// Creates handler instances from the config and wires up routing rules.
-fn build_router(
+async fn build_router(
     config: &mailsis_utils::SmtpConfig,
     crate_root: &std::path::Path,
 ) -> Result<MessageRouter, Box<dyn Error>> {
@@ -461,7 +482,8 @@ fn build_router(
         })?;
 
     // Build default transformers from config
-    let default_transformers = build_transformers(&config.routing.transformers);
+    let default_transformers =
+        build_transformers(&config.routing.transformers, &config.hostname).await;
 
     // Build routing rules
     let mut rules = Vec::new();
@@ -478,8 +500,11 @@ fn build_router(
         let transformers = rule_config
             .transformers
             .as_ref()
-            .map(|t| build_transformers(t))
-            .unwrap_or_default();
+            .map(|t| build_transformers(t, &config.hostname));
+        let transformers = match transformers {
+            Some(fut) => fut.await,
+            None => Vec::new(),
+        };
 
         rules.push(RoutingRule {
             match_type,
@@ -503,17 +528,38 @@ fn build_router(
 }
 
 /// Builds transformer instances from their configuration.
-fn build_transformers(configs: &[TransformerConfig]) -> Vec<Box<dyn MessageTransformer>> {
-    configs
-        .iter()
-        .map(|config| -> Box<dyn MessageTransformer> {
-            match config {
-                TransformerConfig::MessageId { domain } => {
-                    Box::new(MessageIdTransformer::new(domain.clone()))
-                }
+///
+/// The `hostname` parameter is used as the default `authserv_id` for the
+/// `email_auth` transformer when none is explicitly configured.
+async fn build_transformers(
+    configs: &[TransformerConfig],
+    hostname: &str,
+) -> Vec<Box<dyn MessageTransformer>> {
+    let mut transformers: Vec<Box<dyn MessageTransformer>> = Vec::with_capacity(configs.len());
+    for config in configs {
+        let transformer: Box<dyn MessageTransformer> = match config {
+            TransformerConfig::MessageId { domain } => {
+                Box::new(MessageIdTransformer::new(domain.clone()))
             }
-        })
-        .collect()
+            #[cfg(feature = "email-auth")]
+            TransformerConfig::EmailAuth { authserv_id } => {
+                let id = if authserv_id.is_empty() {
+                    hostname.to_string()
+                } else {
+                    authserv_id.clone()
+                };
+                Box::new(mailsis_utils::EmailAuthTransformer::new(id).await)
+            }
+            #[cfg(not(feature = "email-auth"))]
+            TransformerConfig::EmailAuth { .. } => {
+                let _ = hostname;
+                warn!("email_auth transformer requires the 'email-auth' feature to be enabled, skipping");
+                continue;
+            }
+        };
+        transformers.push(transformer);
+    }
+    transformers
 }
 
 /// Main function for the Mailsis SMTP server.
@@ -594,27 +640,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Build the message router from config
-    let router = Arc::new(build_router(smtp, &crate_root).map_err(|error| {
+    let router = Arc::new(build_router(smtp, &crate_root).await.map_err(|error| {
         error!(error = %error, "Failed to build message router");
         error
     })?);
 
-    let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
+    let (tx, mut rx) = mpsc::channel::<IncomingMessage>(100);
 
     // Spawn a task to handle the email routing, this is a long running
     // task that will run until the program is terminated
     let router_handle = router.clone();
     tokio::spawn(async move {
-        while let Some((from, rcpts, body)) = rx.recv().await {
-            for rcpt in &rcpts {
+        while let Some(incoming) = rx.recv().await {
+            for rcpt in &incoming.rcpts {
                 let handler = router_handle.resolve(rcpt);
                 info!(
-                    from = %from,
+                    from = %incoming.from,
                     recipient = %rcpt,
                     handler = handler.name(),
                     "Routing email"
                 );
-                let mut message = EmailMessage::from_raw(&from, rcpt, &body);
+                let mut message = incoming.to_email_message(rcpt);
                 if let Err(error) = router_handle.route(&mut message).await {
                     error!(recipient = %rcpt, error = %error, "Failed to route email");
                 }
@@ -623,7 +669,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let auth_required = smtp.auth_required;
-    info!(address = %listening, "Mailsis-SMTP started");
+    info!(address = %listening, hostname = %smtp.hostname, "Mailsis-SMTP started");
 
     loop {
         let (stream, addr) = listener.accept().await.map_err(|error| {
@@ -651,7 +697,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn handle_smtp_session<A: AuthEngine + 'static>(
     stream: TcpStream,
     tls_acceptor: TlsAcceptor,
-    tx: mpsc::Sender<(String, HashSet<String>, String)>,
+    tx: mpsc::Sender<IncomingMessage>,
     auth_engine: Arc<A>,
     auth_required: bool,
     router: Arc<MessageRouter>,
@@ -662,7 +708,8 @@ async fn handle_smtp_session<A: AuthEngine + 'static>(
 
     // Create a new SMTP session with default values, split the stream into reader and writer
     // and handle the loop starting the SMTP session
-    let mut session = SMTPSession::new(auth_engine, auth_required, router);
+    let client_ip = stream.peer_addr().ok().map(|addr| addr.ip());
+    let mut session = SMTPSession::new(auth_engine, auth_required, router, client_ip);
     let (reader, writer) = split(stream);
     handle_stream(reader, writer, tls_acceptor, tx, &mut session).await?;
     Ok(())
@@ -672,7 +719,7 @@ async fn handle_stream<A: AuthEngine + 'static>(
     reader: ReadHalf<TcpStream>,
     mut writer: WriteHalf<TcpStream>,
     tls_acceptor: TlsAcceptor,
-    tx: mpsc::Sender<(String, HashSet<String>, String)>,
+    tx: mpsc::Sender<IncomingMessage>,
     session: &mut SMTPSession<A>,
 ) -> Result<(), Box<dyn Error>> {
     let mut line = String::with_capacity(4096);
@@ -727,7 +774,7 @@ async fn handle_stream<A: AuthEngine + 'static>(
 
 async fn handle_tls_stream<A: AuthEngine + 'static>(
     stream: TlsStream<TcpStream>,
-    tx: mpsc::Sender<(String, HashSet<String>, String)>,
+    tx: mpsc::Sender<IncomingMessage>,
     session: &mut SMTPSession<A>,
 ) -> Result<(), Box<dyn Error>> {
     let (reader, mut writer) = tokio::io::split(stream);
@@ -769,13 +816,11 @@ fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use mailsis_utils::{MemoryAuthEngine, MessageRouter};
-    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::duplex;
 
-    use super::SMTPSession;
+    use super::*;
 
     fn test_router() -> Arc<MessageRouter> {
         Arc::new(MessageRouter::new(
@@ -791,7 +836,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_ehlo_helo_writes_greeting() {
         let auth_engine = Arc::new(MemoryAuthEngine::new());
-        let session = SMTPSession::new(auth_engine, false, test_router());
+        let session = SMTPSession::new(auth_engine, false, test_router(), None);
 
         let (mut client, mut server) = duplex(1024);
         session.handle_ehlo_helo(&mut server).await.unwrap();
@@ -810,7 +855,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("user".to_string(), "pass".to_string());
         let auth_engine = Arc::new(MemoryAuthEngine::from_map(map));
-        let mut session = SMTPSession::new(auth_engine, false, test_router());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
 
         let encoded_user = STANDARD.encode("user");
         let encoded_pass = STANDARD.encode("pass");
@@ -846,7 +891,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_mail_and_rcpt_adds_addresses() {
         let auth_engine = Arc::new(MemoryAuthEngine::new());
-        let mut session = SMTPSession::new(auth_engine, false, test_router());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
 
         let (mut client, mut server) = duplex(1024);
         session
