@@ -57,7 +57,9 @@ cargo clippy --all-features --all-targets -- -D warnings -A unknown-lints
 - Rust files use LF line endings, while Python files use CRLF.
 - Inline comments should be in the format `// <comment>` and start with uppercase.
 - Inline comments should be written as in "Add support for X" rather than "Adds support for X" or "Added support for X".
-- Always run the format and testing commands after changes
+- Always run the format and testing commands after changes.
+- Make sure test coverage is always above 90% in the entire codebase, so make sure to add tests for new features.
+- Document each Rust module with module-level documentation comments (`//!`).
 
 ## License
 
