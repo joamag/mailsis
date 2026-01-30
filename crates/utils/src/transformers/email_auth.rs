@@ -49,7 +49,12 @@ impl MessageTransformer for EmailAuthTransformer {
 
             let helo_domain = message.helo_domain.as_deref().unwrap_or("unknown");
 
-            let from_domain = message.from.rsplit('@').next().unwrap_or("unknown").to_string();
+            let from_domain = message
+                .from
+                .rsplit('@')
+                .next()
+                .unwrap_or("unknown")
+                .to_string();
 
             // SPF verification
             let spf_output = self
