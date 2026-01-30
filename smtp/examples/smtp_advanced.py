@@ -99,7 +99,13 @@ PRIORITY_HEADERS = {
 
 
 def build_message(args: argparse.Namespace) -> MIMEMultipart:
-    """Build a MIME email message from the parsed CLI arguments."""
+    """
+    Builds a MIME email message from the parsed CLI arguments.
+
+    :param args: Parsed command-line arguments.
+    :return: Constructed MIMEMultipart email message.
+    """
+
     msg = MIMEMultipart("mixed")
     msg["From"] = args.from_addr
     msg["To"] = ", ".join(args.to)
@@ -110,7 +116,6 @@ def build_message(args: argparse.Namespace) -> MIMEMultipart:
     if args.reply_to:
         msg["Reply-To"] = args.reply_to
 
-    # Priority headers
     if args.priority and args.priority != "normal":
         importance, priority, precedence = PRIORITY_HEADERS[args.priority]
         msg["X-Priority"] = importance
@@ -118,7 +123,6 @@ def build_message(args: argparse.Namespace) -> MIMEMultipart:
         msg["Importance"] = priority
         msg["Precedence"] = precedence
 
-    # Body: plain text, or plain + HTML as multipart/alternative
     if args.html:
         alt = MIMEMultipart("alternative")
         alt.attach(MIMEText(args.body, "plain", "utf-8"))
@@ -127,7 +131,6 @@ def build_message(args: argparse.Namespace) -> MIMEMultipart:
     else:
         msg.attach(MIMEText(args.body, "plain", "utf-8"))
 
-    # Attachments
     for file_path in args.attachment or []:
         path = Path(file_path)
         if not path.is_file():
@@ -145,7 +148,12 @@ def build_message(args: argparse.Namespace) -> MIMEMultipart:
 
 
 def send(args: argparse.Namespace) -> None:
-    """Connect to the SMTP server and send the email."""
+    """
+    Connects to the SMTP server and send the email.
+
+    :param args: Parsed command-line arguments.
+    """
+
     all_recipients = list(args.to)
     if args.cc:
         all_recipients.extend(args.cc)
@@ -179,7 +187,13 @@ def send(args: argparse.Namespace) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
+    """
+    Parse command-line arguments.
+
+    :param argv: List of command-line arguments (default: sys.argv).
+    :return: Parsed arguments namespace.
+    """
+
     parser = argparse.ArgumentParser(
         description="Advanced SMTP client for Mailsis.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
