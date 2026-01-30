@@ -8,6 +8,7 @@ use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
+use tracing::{debug, error, info};
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 1430;
@@ -389,7 +390,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
     }
 
     async fn write_raw<W: AsyncWrite + Unpin>(&self, writer: &mut W, data: &str) {
-        println!(">> [DATA] {} bytes", data.len());
+        debug!(bytes = data.len(), ">> [DATA]");
         writer.write_all(data.as_bytes()).await.ok();
     }
 
@@ -413,7 +414,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
         result: &str,
         message: &str,
     ) -> Result<(), Box<dyn Error>> {
-        println!(">> {tag} {result} {message}");
+        debug!(">> {tag} {result} {message}");
         self.write_inner(w, tag, result, message).await;
         Ok(())
     }
@@ -429,6 +430,16 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
 /// and spawns a new task to handle each client.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+            "%Y-%m-%d %H:%M:%S".to_string(),
+        ))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let crate_root = get_crate_root().unwrap_or_else(|_| PathBuf::from("."));
     let host = std::env::var("HOST").unwrap_or_else(|_| HOST.to_string());
     let port: u16 = std::env::var("PORT")
@@ -441,7 +452,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
     let storage_engine = Arc::new(FileStorageEngine::new(crate_root.join("mailbox")));
 
-    println!("Mailsis-IMAP running on {}", &listening);
+    info!(address = %listening, "Mailsis-IMAP started");
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -449,7 +460,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let storage_engine = storage_engine.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_client(stream, auth_engine, storage_engine).await {
-                eprintln!("Error: {e}");
+                error!(error = %e, "IMAP session failed");
             }
         });
     }
@@ -477,7 +488,7 @@ async fn handle_client<A: AuthEngine + 'static, S: StorageEngine + 'static>(
         }
 
         let raw = line.trim_end();
-        println!("<< {raw}");
+        debug!("<< {raw}");
 
         let parts: Vec<&str> = raw.split_whitespace().collect();
         if parts.len() < 2 {

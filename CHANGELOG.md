@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* Added structured logging with `tracing` and `tracing-subscriber` (env-filter support via `RUST_LOG`)
+* Added detailed SMTP session logging: connection lifecycle, authentication, envelope (MAIL FROM/RCPT TO/DATA), routing dispatch, and handler registration
 * Added modular authentication system with `AuthEngine` trait
 * Added `MemoryAuthEngine` for in-memory credential storage
 * Added `AuthError` enum for authentication error handling
@@ -35,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* Replaced `println!`/`eprintln!` with structured `tracing` macros (`info!`, `debug!`, `warn!`, `error!`) in both SMTP and IMAP servers
 * `AuthEngine::authenticate` now returns `AuthResult<()>` instead of `AuthResult<bool>`, with `AuthError::InvalidCredentials` for wrong password and `AuthError::UserNotFound` for non-existent users
 * `MemoryAuthEngine::from_file` now returns `io::Result<Self>` and fails explicitly when the file cannot be read, instead of silently returning an empty credential store
 * SMTP server now uses `AuthEngine` trait for authentication

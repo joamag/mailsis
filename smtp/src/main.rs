@@ -15,6 +15,7 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
+use tracing::{debug, error, info, warn};
 
 /// Represents a single SMTP session, created for each incoming connection.
 ///
@@ -137,10 +138,12 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
             .authenticate(username.trim(), password.trim())
             .is_ok()
         {
+            info!(username = %username.trim(), "Authentication successful");
             self.write_response(writer, 235, "Authentication successful")
                 .await;
             self.authenticated = true;
         } else {
+            warn!(username = %username.trim(), "Authentication failed");
             self.write_response(writer, 535, "Authentication failed")
                 .await;
         }
@@ -172,10 +175,12 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
             .authenticate(username.trim(), password.trim())
             .is_ok()
         {
+            info!(username = %username.trim(), "Authentication successful");
             self.write_response(writer, 235, "Authentication successful")
                 .await;
             self.authenticated = true;
         } else {
+            warn!(username = %username.trim(), "Authentication failed");
             self.write_response(writer, 535, "Authentication failed")
                 .await;
         }
@@ -205,6 +210,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
                 .and_then(|s| s.strip_suffix(">"))
                 .unwrap_or(original_rest.trim())
                 .to_string();
+            info!(from = %self.from, "MAIL FROM accepted");
             self.write_response(writer, 250, "OK").await;
         } else {
             self.write_response(writer, 501, "Syntax error in parameters or arguments")
@@ -234,6 +240,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
                 .and_then(|s| s.strip_suffix(">"))
                 .unwrap_or(original_rest.trim())
                 .to_string();
+            info!(rcpt = %rcpt, "RCPT TO accepted");
             self.rcpts.insert(rcpt);
             self.write_response(writer, 250, "OK").await;
         } else {
@@ -301,6 +308,13 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         let from = take(&mut self.from);
         let rcpts = take(&mut self.rcpts);
 
+        info!(
+            from = %from,
+            recipients = rcpts.len(),
+            size = buffer_data.len(),
+            "Message received"
+        );
+
         tx.send((from, rcpts, data)).await?;
         self.write_response(writer, 250, "Message accepted").await;
 
@@ -311,6 +325,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         &mut self,
         writer: &mut W,
     ) -> Result<(), Box<dyn Error>> {
+        debug!("Session reset");
         self.from.clear();
         self.rcpts.clear();
         self.write_response(writer, 250, "OK").await;
@@ -321,6 +336,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         &self,
         writer: &mut W,
     ) -> Result<(), Box<dyn Error>> {
+        debug!("Client quit");
         self.write_response(writer, 221, "Bye").await;
         Ok(())
     }
@@ -329,6 +345,7 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         &self,
         writer: &mut W,
     ) -> Result<(), Box<dyn Error>> {
+        warn!("Unrecognized command");
         self.write_response(writer, 502, "Command not implemented")
             .await;
         Ok(())
@@ -356,12 +373,10 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         message: &str,
         separator: &str,
     ) {
-        println!(
-            ">> {}{}{}{}",
-            if self.starttls { "[TLS] " } else { "" },
-            code,
-            separator,
-            message
+        debug!(
+            tls = self.starttls,
+            code = code,
+            ">> {code}{separator}{message}"
         );
         writer
             .write_all(format!("{code}{separator}{message}\r\n").as_bytes())
@@ -416,13 +431,12 @@ fn build_router(
             }
             #[cfg(not(feature = "redis"))]
             HandlerConfig::Redis { .. } => {
-                return Err(format!(
-                    "Handler '{}' requires the 'redis' feature to be enabled",
-                    name
-                )
-                .into());
+                return Err(
+                    format!("Handler '{name}' requires the 'redis' feature to be enabled").into(),
+                );
             }
         };
+        info!(name = %name, "Registered handler");
         handlers.insert(name.clone(), handler);
     }
 
@@ -457,6 +471,11 @@ fn build_router(
         });
     }
 
+    info!(
+        rules = rules.len(),
+        default = %config.routing.default,
+        "Router configured"
+    );
     Ok(MessageRouter::new(rules, default_handler))
 }
 
@@ -469,6 +488,16 @@ fn build_router(
 /// task that will run until the program is terminated.
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+            "%Y-%m-%d %H:%M:%S".to_string(),
+        ))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
 
     // Load configuration from file
@@ -477,11 +506,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| crate_root.join("config.toml"));
 
     let config = load_config(&config_path).unwrap_or_else(|e| {
-        println!(
-            "Warning: Could not load config from {}: {e}",
-            config_path.display()
+        warn!(
+            path = %config_path.display(),
+            error = %e,
+            "Could not load config, using defaults"
         );
-        println!("Using default configuration");
         toml::from_str("[smtp]").unwrap()
     });
 
@@ -516,27 +545,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
             for rcpt in &rcpts {
+                let handler = router_handle.resolve(rcpt);
+                info!(
+                    from = %from,
+                    recipient = %rcpt,
+                    handler = handler.name(),
+                    "Routing email"
+                );
                 let message = EmailMessage::from_raw(&from, rcpt, &body);
                 if let Err(error) = router_handle.route(&message).await {
-                    println!("Error routing email to {rcpt}: {error}");
+                    error!(recipient = %rcpt, error = %error, "Failed to route email");
                 }
             }
         }
     });
 
     let auth_required = smtp.auth_required;
-    println!("Mailsis-SMTP running on {}", &listening);
+    info!(address = %listening, "Mailsis-SMTP started");
 
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, addr) = listener.accept().await?;
         let tls_acceptor = tls_acceptor.clone();
         let tx = tx.clone();
         let auth_engine = auth_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                handle_smtp_session(stream, tls_acceptor, tx, auth_engine, auth_required).await
-            {
-                eprintln!("Error: {e}");
+            info!(peer = %addr, "Connection accepted");
+            match handle_smtp_session(stream, tls_acceptor, tx, auth_engine, auth_required).await {
+                Ok(()) => info!(peer = %addr, "Connection closed"),
+                Err(e) => error!(peer = %addr, error = %e, "SMTP session failed"),
             }
         });
     }
@@ -581,7 +617,7 @@ async fn handle_stream<A: AuthEngine + 'static>(
             break;
         }
 
-        println!("<< {}", line.trim());
+        debug!("<< {}", line.trim());
 
         match command.as_str() {
             "STARTTLS" => {
@@ -591,12 +627,12 @@ async fn handle_stream<A: AuthEngine + 'static>(
                 let stream = ReadHalf::unsplit(reader.into_inner(), writer);
                 match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => {
-                        println!("TLS handshake complete");
+                        info!("TLS handshake complete");
                         session.starttls = true;
                         return handle_tls_stream(TlsStream::Server(tls_stream), tx, session).await;
                     }
                     Err(e) => {
-                        eprintln!("TLS handshake failed: {e:?}");
+                        error!(error = ?e, "TLS handshake failed");
                         return Ok(());
                     }
                 }
@@ -633,7 +669,7 @@ async fn handle_tls_stream<A: AuthEngine + 'static>(
             break;
         }
 
-        println!("<< [TLS] {}", line.trim());
+        debug!("<< [TLS] {}", line.trim());
 
         session
             .handle_command(

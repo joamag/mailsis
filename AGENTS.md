@@ -41,6 +41,14 @@ python imap/examples/imap_client.py
 python imap/examples/smtp_client.py
 ```
 
+## Linting
+
+Lint all code before committing:
+
+```bash
+cargo clippy --all-features --all-targets -- -D warnings -A unknown-lints
+```
+
 ## Style Guide
 
 - Always update `CHANGELOG.md` according to semantic versioning, mentioning your changes in the unreleased section.
