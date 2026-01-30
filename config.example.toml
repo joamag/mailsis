@@ -39,7 +39,7 @@ queue = "incoming_emails"
 #   3. Wildcard domain (domain  = "*.domain")
 #   4. Default handler
 #
-# First matching rule wins within each specificity level.
+# First matching rule "wins" within each specificity level.
 
 [smtp.routing]
 default = "local"          # Fallback handler when no rule matches
@@ -50,10 +50,11 @@ default = "local"          # Fallback handler when no rule matches
 type = "message_id"
 domain = "example.com"     # Domain for generated Message-ID headers
 
-# Route a specific user to Redis
+# Route a specific user to Redis (requires authentication)
 [[smtp.routing.rules]]
 address = "alerts@example.com"
 handler = "redis_queue"
+auth_required = true
 
 # Route an entire domain to Redis (with per-rule transformer override)
 [[smtp.routing.rules]]
@@ -64,7 +65,8 @@ handler = "redis_queue"
   type = "message_id"
   domain = "example.com"
 
-# Route all subdomains of internal.org to local storage
+# Route all subdomains of internal.org to local storage (no auth needed)
 [[smtp.routing.rules]]
 domain = "*.internal.org"
 handler = "local"
+auth_required = false

@@ -23,6 +23,7 @@ pub struct RoutingRule {
     pub pattern: String,
     pub handler: Arc<dyn MessageHandler>,
     pub transformers: Vec<Box<dyn MessageTransformer>>,
+    pub auth_required: Option<bool>,
 }
 
 impl RoutingRule {
@@ -61,6 +62,14 @@ pub struct MessageRouter {
     rules: Vec<RoutingRule>,
     default_handler: Arc<dyn MessageHandler>,
     default_transformers: Vec<Box<dyn MessageTransformer>>,
+}
+
+impl std::fmt::Debug for MessageRouter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MessageRouter")
+            .field("rules", &self.rules.len())
+            .finish()
+    }
 }
 
 impl MessageRouter {
@@ -121,6 +130,22 @@ impl MessageRouter {
 
         let handler = self.resolve(&message.to);
         handler.handle(message).await
+    }
+
+    /// Resolves whether authentication is required for a recipient.
+    ///
+    /// Returns the rule's `auth_required` if the matching rule defines it,
+    /// otherwise returns the provided global default.
+    pub fn resolve_auth_required(&self, recipient: &str, global_default: bool) -> bool {
+        for rule in &self.rules {
+            if rule.matches(recipient) {
+                if let Some(auth_req) = rule.auth_required {
+                    return auth_req;
+                }
+                break;
+            }
+        }
+        global_default
     }
 
     /// Returns a reference to the default handler.
@@ -203,6 +228,7 @@ mod tests {
             pattern: "admin@example.com".to_string(),
             handler,
             transformers: vec![],
+            auth_required: None,
         };
 
         assert!(rule.matches("admin@example.com"));
@@ -219,6 +245,7 @@ mod tests {
             pattern: "example.com".to_string(),
             handler,
             transformers: vec![],
+            auth_required: None,
         };
 
         assert!(rule.matches("user@example.com"));
@@ -236,6 +263,7 @@ mod tests {
             pattern: "*.example.com".to_string(),
             handler,
             transformers: vec![],
+            auth_required: None,
         };
 
         assert!(rule.matches("user@sub.example.com"));
@@ -256,12 +284,14 @@ mod tests {
                 pattern: "example.com".to_string(),
                 handler: domain_handler.clone(),
                 transformers: vec![],
+                auth_required: None,
             },
             RoutingRule {
                 match_type: MatchType::ExactAddress,
                 pattern: "admin@example.com".to_string(),
                 handler: exact_handler.clone(),
                 transformers: vec![],
+                auth_required: None,
             },
         ];
 
@@ -282,6 +312,50 @@ mod tests {
         let mut msg = EmailMessage::from_raw("sender@test.com", "user@other.com", "test");
         router.route(&mut msg).await.unwrap();
         assert_eq!(default_handler.count(), 1);
+    }
+
+    #[test]
+    fn test_resolve_auth_required() {
+        let handler = Arc::new(CountingHandler::new("test"));
+        let rules = vec![
+            RoutingRule {
+                match_type: MatchType::ExactAddress,
+                pattern: "secure@example.com".to_string(),
+                handler: handler.clone(),
+                transformers: vec![],
+                auth_required: Some(true),
+            },
+            RoutingRule {
+                match_type: MatchType::Domain,
+                pattern: "open.com".to_string(),
+                handler: handler.clone(),
+                transformers: vec![],
+                auth_required: Some(false),
+            },
+            RoutingRule {
+                match_type: MatchType::Domain,
+                pattern: "default.com".to_string(),
+                handler: handler.clone(),
+                transformers: vec![],
+                auth_required: None,
+            },
+        ];
+
+        let router = MessageRouter::new(rules, handler, vec![]);
+
+        // Rule with auth_required=true overrides global
+        assert!(router.resolve_auth_required("secure@example.com", false));
+
+        // Rule with auth_required=false overrides global
+        assert!(!router.resolve_auth_required("user@open.com", true));
+
+        // Rule with auth_required=None falls back to global
+        assert!(router.resolve_auth_required("user@default.com", true));
+        assert!(!router.resolve_auth_required("user@default.com", false));
+
+        // No matching rule falls back to global
+        assert!(router.resolve_auth_required("user@unknown.com", true));
+        assert!(!router.resolve_auth_required("user@unknown.com", false));
     }
 
     #[test]

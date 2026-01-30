@@ -131,6 +131,10 @@ pub struct RoutingRuleConfig {
 
     /// Transformers for this rule, overrides the default transformers if present.
     pub transformers: Option<Vec<TransformerConfig>>,
+
+    /// Whether authentication is required for recipients matching this rule.
+    /// Overrides the global `smtp.auth_required` setting when present.
+    pub auth_required: Option<bool>,
 }
 
 /// Configuration for a message transformer.
@@ -355,6 +359,31 @@ handler = "local"
 
         // Rule without transformers
         assert!(config.smtp.routing.rules[1].transformers.is_none());
+    }
+
+    #[test]
+    fn test_parse_auth_required_per_rule() {
+        let toml = r#"
+[smtp]
+
+[[smtp.routing.rules]]
+address = "secure@example.com"
+handler = "local"
+auth_required = true
+
+[[smtp.routing.rules]]
+domain = "open.com"
+handler = "local"
+auth_required = false
+
+[[smtp.routing.rules]]
+domain = "default.com"
+handler = "local"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.smtp.routing.rules[0].auth_required, Some(true));
+        assert_eq!(config.smtp.routing.rules[1].auth_required, Some(false));
+        assert_eq!(config.smtp.routing.rules[2].auth_required, None);
     }
 
     #[test]

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* Added per-rule `auth_required` override in routing configuration (per-recipient authentication at RCPT TO time)
+* Added `MessageRouter::resolve_auth_required()` for recipient-based auth resolution with global fallback
 * Added `MessageTransformer` trait for pluggable email transformation pipeline
 * Added `MessageIdTransformer` that injects or syncs RFC 5322 `Message-ID` headers
 * Added `TransformerConfig` enum for TOML-based transformer configuration

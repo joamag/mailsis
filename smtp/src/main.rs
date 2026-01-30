@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 /// This struct is used to store the state of the SMTP session, including the
 /// from address, the recipients, whether the session is authenticated, whether
 /// TLS is required, and the authentication engine.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SMTPSession<A: AuthEngine> {
     from: String,
     rcpts: HashSet<String>,
@@ -30,15 +30,20 @@ struct SMTPSession<A: AuthEngine> {
     auth_required: bool,
     starttls: bool,
     auth_engine: Arc<A>,
+    router: Arc<MessageRouter>,
 }
 
 impl<A: AuthEngine + Default> SMTPSession<A> {
     /// Creates a new SMTP session with default values.
-    pub fn new(auth_engine: Arc<A>, auth_required: bool) -> Self {
+    pub fn new(auth_engine: Arc<A>, auth_required: bool, router: Arc<MessageRouter>) -> Self {
         Self {
+            from: String::new(),
+            rcpts: HashSet::new(),
+            authenticated: false,
             auth_required,
+            starttls: false,
             auth_engine,
-            ..Default::default()
+            router,
         }
     }
 
@@ -224,13 +229,6 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         writer: &mut W,
         value: &str,
     ) -> Result<(), Box<dyn Error>> {
-        // Ensure that the user is authenticated before sending the mail
-        if !self.authenticated && self.auth_required {
-            self.write_response(writer, 530, "Authentication required")
-                .await;
-            return Ok(());
-        }
-
         // SMTP is case-insensitive, check prefix without allocation
         if value.len() >= 3 && value[..3].eq_ignore_ascii_case("TO:") {
             let original_rest = &value[3..];
@@ -240,6 +238,17 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
                 .and_then(|s| s.strip_suffix(">"))
                 .unwrap_or(original_rest.trim())
                 .to_string();
+
+            // Check per-rule auth requirement for this recipient,
+            // falling back to the global auth_required setting
+            let auth_needed = self.router.resolve_auth_required(&rcpt, self.auth_required);
+            if !self.authenticated && auth_needed {
+                warn!(rcpt = %rcpt, "RCPT TO rejected: authentication required");
+                self.write_response(writer, 530, "Authentication required")
+                    .await;
+                return Ok(());
+            }
+
             info!(rcpt = %rcpt, "RCPT TO accepted");
             self.rcpts.insert(rcpt);
             self.write_response(writer, 250, "OK").await;
@@ -477,6 +486,7 @@ fn build_router(
             pattern,
             handler,
             transformers,
+            auth_required: rule_config.auth_required,
         });
     }
 
@@ -595,9 +605,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let tls_acceptor = tls_acceptor.clone();
         let tx = tx.clone();
         let auth_engine = auth_engine.clone();
+        let router = router.clone();
         tokio::spawn(async move {
             info!(peer = %addr, "Connection accepted");
-            match handle_smtp_session(stream, tls_acceptor, tx, auth_engine, auth_required).await {
+            match handle_smtp_session(stream, tls_acceptor, tx, auth_engine, auth_required, router)
+                .await
+            {
                 Ok(()) => info!(peer = %addr, "Connection closed"),
                 Err(e) => error!(peer = %addr, error = %e, "SMTP session failed"),
             }
@@ -611,6 +624,7 @@ async fn handle_smtp_session<A: AuthEngine + 'static>(
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     auth_engine: Arc<A>,
     auth_required: bool,
+    router: Arc<MessageRouter>,
 ) -> Result<(), Box<dyn Error>> {
     // Optimize TCP settings, removing the delay and setting the TTL to 64
     stream.set_nodelay(true).expect("Failed to set TCP_NODELAY");
@@ -618,7 +632,7 @@ async fn handle_smtp_session<A: AuthEngine + 'static>(
 
     // Create a new SMTP session with default values, split the stream into reader and writer
     // and handle the loop starting the SMTP session
-    let mut session = SMTPSession::new(auth_engine, auth_required);
+    let mut session = SMTPSession::new(auth_engine, auth_required, router);
     let (reader, writer) = split(stream);
     handle_stream(reader, writer, tls_acceptor, tx, &mut session).await?;
     Ok(())
@@ -728,15 +742,26 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use mailsis_utils::MemoryAuthEngine;
+    use mailsis_utils::{MemoryAuthEngine, MessageRouter};
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, BufReader};
 
     use super::SMTPSession;
 
+    fn test_router() -> Arc<MessageRouter> {
+        Arc::new(MessageRouter::new(
+            vec![],
+            Arc::new(mailsis_utils::FileStorageHandler::new(
+                std::path::PathBuf::from("test_mailbox"),
+                false,
+            )),
+            vec![],
+        ))
+    }
+
     #[tokio::test]
     async fn test_handle_ehlo_helo_writes_greeting() {
         let auth_engine = Arc::new(MemoryAuthEngine::new());
-        let session = SMTPSession::new(auth_engine, false);
+        let session = SMTPSession::new(auth_engine, false, test_router());
 
         let (mut client, mut server) = duplex(1024);
         session.handle_ehlo_helo(&mut server).await.unwrap();
@@ -755,7 +780,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("user".to_string(), "pass".to_string());
         let auth_engine = Arc::new(MemoryAuthEngine::from_map(map));
-        let mut session = SMTPSession::new(auth_engine, false);
+        let mut session = SMTPSession::new(auth_engine, false, test_router());
 
         let encoded_user = STANDARD.encode("user");
         let encoded_pass = STANDARD.encode("pass");
@@ -791,7 +816,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_mail_and_rcpt_adds_addresses() {
         let auth_engine = Arc::new(MemoryAuthEngine::new());
-        let mut session = SMTPSession::new(auth_engine, false);
+        let mut session = SMTPSession::new(auth_engine, false, test_router());
 
         let (mut client, mut server) = duplex(1024);
         session
