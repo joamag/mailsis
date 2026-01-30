@@ -3,6 +3,8 @@
 Cargo.lock
 random_data.bin
 
+/.claude
+
 /target
 /mailbox
 
