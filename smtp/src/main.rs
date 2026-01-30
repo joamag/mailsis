@@ -542,10 +542,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| crate_root.join("config.toml"));
 
-    let config = load_config(&config_path).unwrap_or_else(|e| {
+    let config = load_config(&config_path).unwrap_or_else(|error| {
         warn!(
             path = %config_path.display(),
-            error = %e,
+            error = %error,
             "Could not load config, using defaults"
         );
         toml::from_str("[smtp]").unwrap()
@@ -558,14 +558,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let tls_config = Arc::new(
         load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).map_err(
-            |e| {
+            |error| {
                 error!(
                     cert = %cert_path.display(),
                     key = %key_path.display(),
-                    error = %e,
+                    error = %error,
                     "Failed to load TLS configuration"
                 );
-                e
+                error
             },
         )?,
     );
@@ -576,25 +576,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(smtp.port);
     let listening = format!("{host}:{port}");
-    let listener = TcpListener::bind(&listening).await.map_err(|e| {
-        error!(address = %listening, error = %e, "Failed to bind TCP listener");
-        e
+    let listener = TcpListener::bind(&listening).await.map_err(|error| {
+        error!(address = %listening, error = %error, "Failed to bind TCP listener");
+        error
     })?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config);
-    let auth_engine = Arc::new(load_credentials(&smtp.auth.credentials_file).map_err(|e| {
-        error!(
-            file = %smtp.auth.credentials_file,
-            error = %e,
-            "Failed to load credentials"
-        );
-        e
-    })?);
+    let auth_engine = Arc::new(
+        load_credentials(&smtp.auth.credentials_file).map_err(|error| {
+            error!(
+                file = %smtp.auth.credentials_file,
+                error = %error,
+                "Failed to load credentials"
+            );
+            error
+        })?,
+    );
 
     // Build the message router from config
-    let router = Arc::new(build_router(smtp, &crate_root).map_err(|e| {
-        error!(error = %e, "Failed to build message router");
-        e
+    let router = Arc::new(build_router(smtp, &crate_root).map_err(|error| {
+        error!(error = %error, "Failed to build message router");
+        error
     })?);
 
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
@@ -638,7 +640,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await
             {
                 Ok(()) => info!(peer = %addr, "Connection closed"),
-                Err(e) => error!(peer = %addr, error = %e, "SMTP session failed"),
+                Err(error) => {
+                    error!(peer = %addr, error = %error, "SMTP session failed")
+                }
             }
         });
     }
@@ -698,8 +702,8 @@ async fn handle_stream<A: AuthEngine + 'static>(
                         session.starttls = true;
                         return handle_tls_stream(TlsStream::Server(tls_stream), tx, session).await;
                     }
-                    Err(e) => {
-                        error!(error = ?e, "TLS handshake failed");
+                    Err(error) => {
+                        error!(error = ?error, "TLS handshake failed");
                         return Ok(());
                     }
                 }

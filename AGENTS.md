@@ -60,6 +60,7 @@ cargo clippy --all-features --all-targets -- -D warnings -A unknown-lints
 - Always run the format and testing commands after changes.
 - Make sure test coverage is always above 90% in the entire codebase, so make sure to add tests for new features.
 - Document each Rust module with module-level documentation comments (`//!`).
+- Try to avoid super single letter variable names like `e`, even in the context of `map` and `map_err` closures - use moa bit more descriptive names like `error`, `line`, `part`, etc.
 
 ## License
 

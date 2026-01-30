@@ -262,7 +262,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
             self.storage_engine
                 .create_mailbox(self.safe_username(), &mailbox)
                 .await
-                .map_err(|e| format!("Failed to create mailbox: {e}"))?;
+                .map_err(|error| format!("Failed to create mailbox: {error}"))?;
             self.write_response(writer, tag, "OK", "CREATE completed")
                 .await?;
         } else {
@@ -376,7 +376,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
             .storage_engine
             .list(self.safe_username())
             .await
-            .map_err(|e| format!("Failed to list messages: {e}"))?;
+            .map_err(|error| format!("Failed to list messages: {error}"))?;
         Ok(messages)
     }
 
@@ -385,7 +385,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
             .storage_engine
             .retrieve(self.safe_username(), message_id)
             .await
-            .map_err(|e| format!("Failed to fetch message: {e}"))?;
+            .map_err(|error| format!("Failed to fetch message: {error}"))?;
         Ok(content)
     }
 
@@ -447,20 +447,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .parse()
         .unwrap();
     let listening = format!("{host}:{port}");
-    let listener = TcpListener::bind(&listening).await?;
+    let listener = TcpListener::bind(&listening).await.map_err(|error| {
+        error!(address = %listening, error = %error, "Failed to bind TCP listener");
+        error
+    })?;
 
-    let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
+    let auth_engine = Arc::new(load_credentials("passwords/example.txt").map_err(|error| {
+        error!(error = %error, "Failed to load credentials");
+        error
+    })?);
     let storage_engine = Arc::new(FileStorageEngine::new(crate_root.join("mailbox")));
 
     info!(address = %listening, "Mailsis-IMAP started");
 
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = listener.accept().await.map_err(|error| {
+            error!(error = %error, "Failed to accept connection");
+            error
+        })?;
         let auth_engine = auth_engine.clone();
         let storage_engine = storage_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream, auth_engine, storage_engine).await {
-                error!(error = %e, "IMAP session failed");
+            if let Err(error) = handle_client(stream, auth_engine, storage_engine).await {
+                error!(error = %error, "IMAP session failed");
             }
         });
     }
