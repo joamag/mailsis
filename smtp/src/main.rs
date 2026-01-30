@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{
     determine_match_type, extract_pattern, get_crate_root, load_config, load_tls_server_config,
     AuthEngine, EmailMessage, FileStorageHandler, HandlerConfig, MemoryAuthEngine, MessageHandler,
-    MessageRouter, RoutingRule,
+    MessageIdTransformer, MessageRouter, MessageTransformer, RoutingRule, TransformerConfig,
 };
 use tokio::{
     io::{
@@ -451,6 +451,9 @@ fn build_router(
             )
         })?;
 
+    // Build default transformers from config
+    let default_transformers = build_transformers(&config.routing.transformers);
+
     // Build routing rules
     let mut rules = Vec::new();
     for rule_config in &config.routing.rules {
@@ -463,11 +466,17 @@ fn build_router(
 
         let match_type = determine_match_type(&rule_config.address, &rule_config.domain);
         let pattern = extract_pattern(&rule_config.address, &rule_config.domain);
+        let transformers = rule_config
+            .transformers
+            .as_ref()
+            .map(|t| build_transformers(t))
+            .unwrap_or_default();
 
         rules.push(RoutingRule {
             match_type,
             pattern,
             handler,
+            transformers,
         });
     }
 
@@ -476,7 +485,25 @@ fn build_router(
         default = %config.routing.default,
         "Router configured"
     );
-    Ok(MessageRouter::new(rules, default_handler))
+    Ok(MessageRouter::new(
+        rules,
+        default_handler,
+        default_transformers,
+    ))
+}
+
+/// Builds transformer instances from their configuration.
+fn build_transformers(configs: &[TransformerConfig]) -> Vec<Box<dyn MessageTransformer>> {
+    configs
+        .iter()
+        .map(|config| -> Box<dyn MessageTransformer> {
+            match config {
+                TransformerConfig::MessageId { domain } => {
+                    Box::new(MessageIdTransformer::new(domain.clone()))
+                }
+            }
+        })
+        .collect()
 }
 
 /// Main function for the Mailsis SMTP server.
@@ -552,8 +579,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     handler = handler.name(),
                     "Routing email"
                 );
-                let message = EmailMessage::from_raw(&from, rcpt, &body);
-                if let Err(error) = router_handle.route(&message).await {
+                let mut message = EmailMessage::from_raw(&from, rcpt, &body);
+                if let Err(error) = router_handle.route(&mut message).await {
                     error!(recipient = %rcpt, error = %error, "Failed to route email");
                 }
             }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     handler::{HandlerResult, MessageHandler},
+    transformer::{apply_transformers, MessageTransformer},
     EmailMessage,
 };
 
@@ -21,6 +22,7 @@ pub struct RoutingRule {
     pub match_type: MatchType,
     pub pattern: String,
     pub handler: Arc<dyn MessageHandler>,
+    pub transformers: Vec<Box<dyn MessageTransformer>>,
 }
 
 impl RoutingRule {
@@ -58,13 +60,19 @@ impl RoutingRule {
 pub struct MessageRouter {
     rules: Vec<RoutingRule>,
     default_handler: Arc<dyn MessageHandler>,
+    default_transformers: Vec<Box<dyn MessageTransformer>>,
 }
 
 impl MessageRouter {
-    /// Creates a new `MessageRouter` with the given rules and default handler.
+    /// Creates a new `MessageRouter` with the given rules, default handler, and
+    /// default transformers.
     ///
     /// Rules are automatically sorted by specificity (exact > domain > wildcard).
-    pub fn new(mut rules: Vec<RoutingRule>, default_handler: Arc<dyn MessageHandler>) -> Self {
+    pub fn new(
+        mut rules: Vec<RoutingRule>,
+        default_handler: Arc<dyn MessageHandler>,
+        default_transformers: Vec<Box<dyn MessageTransformer>>,
+    ) -> Self {
         // Sort by specificity: ExactAddress first, then Domain, then WildcardDomain
         rules.sort_by_key(|r| match r.match_type {
             MatchType::ExactAddress => 0,
@@ -74,6 +82,7 @@ impl MessageRouter {
         Self {
             rules,
             default_handler,
+            default_transformers,
         }
     }
 
@@ -87,8 +96,29 @@ impl MessageRouter {
         &self.default_handler
     }
 
+    /// Resolves the transformers for a given recipient.
+    ///
+    /// Returns rule-specific transformers if the matching rule defines them,
+    /// otherwise falls back to the default transformers.
+    fn resolve_transformers(&self, recipient: &str) -> &[Box<dyn MessageTransformer>] {
+        for rule in &self.rules {
+            if rule.matches(recipient) {
+                if !rule.transformers.is_empty() {
+                    return &rule.transformers;
+                }
+                return &self.default_transformers;
+            }
+        }
+        &self.default_transformers
+    }
+
     /// Routes a message to the appropriate handler based on the recipient address.
-    pub async fn route(&self, message: &EmailMessage) -> HandlerResult<()> {
+    ///
+    /// Applies transformers before dispatching to the handler.
+    pub async fn route(&self, message: &mut EmailMessage) -> HandlerResult<()> {
+        let transformers = self.resolve_transformers(&message.to);
+        apply_transformers(transformers, message);
+
         let handler = self.resolve(&message.to);
         handler.handle(message).await
     }
@@ -172,6 +202,7 @@ mod tests {
             match_type: MatchType::ExactAddress,
             pattern: "admin@example.com".to_string(),
             handler,
+            transformers: vec![],
         };
 
         assert!(rule.matches("admin@example.com"));
@@ -187,6 +218,7 @@ mod tests {
             match_type: MatchType::Domain,
             pattern: "example.com".to_string(),
             handler,
+            transformers: vec![],
         };
 
         assert!(rule.matches("user@example.com"));
@@ -203,6 +235,7 @@ mod tests {
             match_type: MatchType::WildcardDomain,
             pattern: "*.example.com".to_string(),
             handler,
+            transformers: vec![],
         };
 
         assert!(rule.matches("user@sub.example.com"));
@@ -222,30 +255,32 @@ mod tests {
                 match_type: MatchType::Domain,
                 pattern: "example.com".to_string(),
                 handler: domain_handler.clone(),
+                transformers: vec![],
             },
             RoutingRule {
                 match_type: MatchType::ExactAddress,
                 pattern: "admin@example.com".to_string(),
                 handler: exact_handler.clone(),
+                transformers: vec![],
             },
         ];
 
-        let router = MessageRouter::new(rules, default_handler.clone());
+        let router = MessageRouter::new(rules, default_handler.clone(), vec![]);
 
         // Verify exact match takes priority over domain match
-        let msg = EmailMessage::from_raw("sender@test.com", "admin@example.com", "test");
-        router.route(&msg).await.unwrap();
+        let mut msg = EmailMessage::from_raw("sender@test.com", "admin@example.com", "test");
+        router.route(&mut msg).await.unwrap();
         assert_eq!(exact_handler.count(), 1);
         assert_eq!(domain_handler.count(), 0);
 
         // Verify domain match for other users
-        let msg = EmailMessage::from_raw("sender@test.com", "user@example.com", "test");
-        router.route(&msg).await.unwrap();
+        let mut msg = EmailMessage::from_raw("sender@test.com", "user@example.com", "test");
+        router.route(&mut msg).await.unwrap();
         assert_eq!(domain_handler.count(), 1);
 
         // Verify default handler for unmatched domains
-        let msg = EmailMessage::from_raw("sender@test.com", "user@other.com", "test");
-        router.route(&msg).await.unwrap();
+        let mut msg = EmailMessage::from_raw("sender@test.com", "user@other.com", "test");
+        router.route(&mut msg).await.unwrap();
         assert_eq!(default_handler.count(), 1);
     }
 

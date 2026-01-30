@@ -93,9 +93,16 @@ pub enum HandlerConfig {
 /// Routing configuration with rules and a default handler.
 #[derive(Debug, Deserialize)]
 pub struct RoutingConfig {
+    /// Default handler name for routed messages.
     #[serde(default = "default_handler_name")]
     pub default: String,
 
+    /// Default transformers applied to all routed messages unless
+    /// overridden per rule.
+    #[serde(default)]
+    pub transformers: Vec<TransformerConfig>,
+
+    /// Sequence of routing rules to be applied according to specificity.
     #[serde(default)]
     pub rules: Vec<RoutingRuleConfig>,
 }
@@ -104,6 +111,7 @@ impl Default for RoutingConfig {
     fn default() -> Self {
         Self {
             default: default_handler_name(),
+            transformers: Vec::new(),
             rules: Vec::new(),
         }
     }
@@ -120,6 +128,22 @@ pub struct RoutingRuleConfig {
 
     /// Name of the handler to route to.
     pub handler: String,
+
+    /// Transformers for this rule, overrides the default transformers if present.
+    pub transformers: Option<Vec<TransformerConfig>>,
+}
+
+/// Configuration for a message transformer.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum TransformerConfig {
+    /// Ensures a Message-ID header exists in the email body.
+    #[serde(rename = "message_id")]
+    MessageId {
+        /// Domain used when generating new Message-ID values.
+        #[serde(default = "default_host")]
+        domain: String,
+    },
 }
 
 /// Loads configuration from a TOML file.
@@ -286,6 +310,51 @@ handler = "local"
             config.smtp.routing.rules[2].domain.as_deref(),
             Some("*.internal.org")
         );
+    }
+
+    #[test]
+    fn test_parse_transformers_config() {
+        let toml = r#"
+[smtp]
+
+[[smtp.routing.transformers]]
+type = "message_id"
+domain = "mail.example.com"
+
+[[smtp.routing.rules]]
+domain = "example.com"
+handler = "local"
+
+  [[smtp.routing.rules.transformers]]
+  type = "message_id"
+  domain = "example.com"
+
+[[smtp.routing.rules]]
+domain = "other.com"
+handler = "local"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+
+        // Default transformers
+        assert_eq!(config.smtp.routing.transformers.len(), 1);
+        match &config.smtp.routing.transformers[0] {
+            TransformerConfig::MessageId { domain } => {
+                assert_eq!(domain, "mail.example.com");
+            }
+        }
+
+        // Per-rule transformers
+        assert!(config.smtp.routing.rules[0].transformers.is_some());
+        let rule_transformers = config.smtp.routing.rules[0].transformers.as_ref().unwrap();
+        assert_eq!(rule_transformers.len(), 1);
+        match &rule_transformers[0] {
+            TransformerConfig::MessageId { domain } => {
+                assert_eq!(domain, "example.com");
+            }
+        }
+
+        // Rule without transformers
+        assert!(config.smtp.routing.rules[1].transformers.is_none());
     }
 
     #[test]

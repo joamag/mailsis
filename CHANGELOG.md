@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* Added `MessageTransformer` trait for pluggable email transformation pipeline
+* Added `MessageIdTransformer` that injects or syncs RFC 5322 `Message-ID` headers
+* Added `TransformerConfig` enum for TOML-based transformer configuration
+* Added per-rule transformer overrides in routing configuration (rule-level transformers override defaults)
+* Added default transformers in `RoutingConfig` applied to all routed messages
 * Added structured logging with `tracing` and `tracing-subscriber` (env-filter support via `RUST_LOG`)
 * Added detailed SMTP session logging: connection lifecycle, authentication, envelope (MAIL FROM/RCPT TO/DATA), routing dispatch, and handler registration
 * Added internal logging to `FileStorageHandler` and `RedisQueueHandler` (initialization, success, errors)

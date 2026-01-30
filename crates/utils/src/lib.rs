@@ -10,6 +10,7 @@ pub mod mime;
 pub mod router;
 pub mod storage;
 pub mod tls;
+pub mod transformer;
 
 pub use auth::*;
 pub use config::*;
@@ -24,3 +25,4 @@ pub use mime::*;
 pub use router::*;
 pub use storage::*;
 pub use tls::*;
+pub use transformer::*;

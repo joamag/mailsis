@@ -44,15 +44,25 @@ queue = "incoming_emails"
 [smtp.routing]
 default = "local"          # Fallback handler when no rule matches
 
+# Default transformers applied to all routed messages unless a rule
+# overrides them with its own transformer list.
+[[smtp.routing.transformers]]
+type = "message_id"
+domain = "example.com"     # Domain for generated Message-ID headers
+
 # Route a specific user to Redis
 [[smtp.routing.rules]]
 address = "alerts@example.com"
 handler = "redis_queue"
 
-# Route an entire domain to Redis
+# Route an entire domain to Redis (with per-rule transformer override)
 [[smtp.routing.rules]]
 domain = "example.com"
 handler = "redis_queue"
+
+  [[smtp.routing.rules.transformers]]
+  type = "message_id"
+  domain = "example.com"
 
 # Route all subdomains of internal.org to local storage
 [[smtp.routing.rules]]
