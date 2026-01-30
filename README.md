@@ -16,6 +16,60 @@ Built on top of the powerful [Rust Programming Language](https://www.rust-lang.o
 - Mailbox storage, with support for multiple users
 - File-system based, allowing for easy integration with existing systems
 
+### SMTP Server
+
+Run the SMTP server from the workspace root:
+
+```bash
+cargo run -p mailsis-smtp
+```
+
+Configuration is loaded from `config.toml` by default. To point to a different config file, set the `MAILSIS_CONFIG` environment variable before launching.
+
+By default, the server listens on `127.0.0.1:2525`. You can override the bind address with `HOST` and `PORT` environment variables.
+
+Authentication uses `passwords/example.txt`, and `smtp.auth_required` is `false` by default. Set it to `true` in the config to require credentials.
+
+### IMAP Server
+
+Run the IMAP server from the workspace root:
+
+```bash
+cargo run -p mailsis-imap
+```
+
+By default, the IMAP server listens on `127.0.0.1:1430`. You can override the bind address with `HOST` and `PORT` environment variables.
+
+Authentication uses `passwords/example.txt` and messages are read from `mailbox/`.
+
+#### Examples
+
+> Note: Start the SMTP/IMAP servers before running the example clients. The example credentials in `passwords/example.txt` include `sender@localhost:password` and `recipient@localhost:password`.
+
+SMTP Python client (sends a test email with an attachment):
+
+```bash
+python smtp/examples/smtp_client.py
+```
+
+SMTP Rust clients:
+
+```bash
+cargo run -p mailsis-smtp --example smtp_client
+```
+
+```bash
+cargo run -p mailsis-smtp --example smtp_raw
+```
+
+The `smtp_client` example validates TLS using `certs/ca.cert.pem`. The `smtp_raw` example can optionally take a file path to send as an attachment.
+
+IMAP Python client (reads the latest email from INBOX):
+
+```bash
+python imap/examples/imap_client.py
+```
+
 ## License
 
 Mailsis is currently licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/).

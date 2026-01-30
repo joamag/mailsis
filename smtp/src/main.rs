@@ -2,8 +2,9 @@ use std::{collections::HashSet, error::Error, mem::take, path::PathBuf, str::Fro
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{
-    get_crate_root, load_tls_server_config, AuthEngine, EmailMessage, FileStorageEngine,
-    MemoryAuthEngine, StorageEngine,
+    determine_match_type, extract_pattern, get_crate_root, load_config, load_tls_server_config,
+    AuthEngine, EmailMessage, FileStorageHandler, HandlerConfig, MemoryAuthEngine, MessageHandler,
+    MessageRouter, RoutingRule,
 };
 use tokio::{
     io::{
@@ -14,9 +15,6 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
-
-const HOST: &str = "127.0.0.1";
-const PORT: u16 = 2525;
 
 /// Represents a single SMTP session, created for each incoming connection.
 ///
@@ -394,51 +392,139 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
     }
 }
 
+/// Builds a message router from the SMTP configuration.
+///
+/// Creates handler instances from the config and wires up routing rules.
+fn build_router(
+    config: &mailsis_utils::SmtpConfig,
+    crate_root: &std::path::Path,
+) -> Result<MessageRouter, Box<dyn Error>> {
+    let mut handlers: std::collections::HashMap<String, Arc<dyn MessageHandler>> =
+        std::collections::HashMap::new();
+
+    // Build handler instances from config
+    for (name, handler_config) in &config.handlers {
+        let handler: Arc<dyn MessageHandler> = match handler_config {
+            HandlerConfig::FileStorage { path, metadata } => {
+                let base_path = crate_root.join(path);
+                Arc::new(FileStorageHandler::new(base_path, *metadata)) as Arc<dyn MessageHandler>
+            }
+            #[cfg(feature = "redis")]
+            HandlerConfig::Redis { url, queue } => {
+                Arc::new(mailsis_utils::RedisQueueHandler::new(url, queue.clone())?)
+                    as Arc<dyn MessageHandler>
+            }
+            #[cfg(not(feature = "redis"))]
+            HandlerConfig::Redis { .. } => {
+                return Err(format!(
+                    "Handler '{}' requires the 'redis' feature to be enabled",
+                    name
+                )
+                .into());
+            }
+        };
+        handlers.insert(name.clone(), handler);
+    }
+
+    // Resolve default handler
+    let default_handler = handlers
+        .get(&config.routing.default)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "Default handler '{}' not found in handlers config",
+                config.routing.default
+            )
+        })?;
+
+    // Build routing rules
+    let mut rules = Vec::new();
+    for rule_config in &config.routing.rules {
+        let handler = handlers.get(&rule_config.handler).cloned().ok_or_else(|| {
+            format!(
+                "Handler '{}' referenced in routing rule not found",
+                rule_config.handler
+            )
+        })?;
+
+        let match_type = determine_match_type(&rule_config.address, &rule_config.domain);
+        let pattern = extract_pattern(&rule_config.address, &rule_config.domain);
+
+        rules.push(RoutingRule {
+            match_type,
+            pattern,
+            handler,
+        });
+    }
+
+    Ok(MessageRouter::new(rules, default_handler))
+}
+
 /// Main function for the Mailsis SMTP server.
 ///
 /// It will listen for incoming connections on the specified port and handle them
 /// using the [`handle_smtp_session`] function.
 ///
-/// It will also spawn a task to handle the email storage, this is a long running
+/// It will also spawn a task to handle the email routing, this is a long running
 /// task that will run until the program is terminated.
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> Result<(), Box<dyn Error>> {
     let crate_root = get_crate_root().unwrap_or(PathBuf::from_str(".").unwrap());
 
-    let cert_path = crate_root.join("certs").join("server.cert.pem");
-    let key_path = crate_root.join("certs").join("server.key.pem");
+    // Load configuration from file
+    let config_path = std::env::var("MAILSIS_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| crate_root.join("config.toml"));
+
+    let config = load_config(&config_path).unwrap_or_else(|e| {
+        println!(
+            "Warning: Could not load config from {}: {e}",
+            config_path.display()
+        );
+        println!("Using default configuration");
+        toml::from_str("[smtp]").unwrap()
+    });
+
+    let smtp = &config.smtp;
+
+    let cert_path = crate_root.join(&smtp.tls.cert);
+    let key_path = crate_root.join(&smtp.tls.key);
 
     let tls_config = Arc::new(
         load_tls_server_config(cert_path.to_str().unwrap(), key_path.to_str().unwrap()).unwrap(),
     );
 
-    let host = std::env::var("HOST").unwrap_or_else(|_| HOST.to_string());
+    let host = std::env::var("HOST").unwrap_or_else(|_| smtp.host.clone());
     let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| PORT.to_string())
-        .parse()
-        .unwrap();
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(smtp.port);
     let listening = format!("{host}:{port}");
     let listener = TcpListener::bind(&listening).await?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config);
-    let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
-    let storage_engine = Arc::new(FileStorageEngine::new(crate_root.join("mailbox")));
+    let auth_engine = Arc::new(load_credentials(&smtp.auth.credentials_file)?);
+
+    // Build the message router from config
+    let router = Arc::new(build_router(smtp, &crate_root)?);
+
     let (tx, mut rx) = mpsc::channel::<(String, HashSet<String>, String)>(100);
 
-    // Spawn a task to handle the email storage, this is a long running
+    // Spawn a task to handle the email routing, this is a long running
     // task that will run until the program is terminated
-    let storage = storage_engine.clone();
+    let router_handle = router.clone();
     tokio::spawn(async move {
         while let Some((from, rcpts, body)) = rx.recv().await {
-            for rcpt in rcpts {
-                let message = EmailMessage::from_raw(&from, &rcpt, &body);
-                if let Err(error) = storage.store(&message).await {
-                    println!("Error storing email: {error}");
+            for rcpt in &rcpts {
+                let message = EmailMessage::from_raw(&from, rcpt, &body);
+                if let Err(error) = router_handle.route(&message).await {
+                    println!("Error routing email to {rcpt}: {error}");
                 }
             }
         }
     });
 
+    let auth_required = smtp.auth_required;
     println!("Mailsis-SMTP running on {}", &listening);
 
     loop {
@@ -447,7 +533,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let tx = tx.clone();
         let auth_engine = auth_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_smtp_session(stream, tls_acceptor, tx, auth_engine).await {
+            if let Err(e) =
+                handle_smtp_session(stream, tls_acceptor, tx, auth_engine, auth_required).await
+            {
                 eprintln!("Error: {e}");
             }
         });
@@ -459,6 +547,7 @@ async fn handle_smtp_session<A: AuthEngine + 'static>(
     tls_acceptor: TlsAcceptor,
     tx: mpsc::Sender<(String, HashSet<String>, String)>,
     auth_engine: Arc<A>,
+    auth_required: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Optimize TCP settings, removing the delay and setting the TTL to 64
     stream.set_nodelay(true).expect("Failed to set TCP_NODELAY");
@@ -466,7 +555,7 @@ async fn handle_smtp_session<A: AuthEngine + 'static>(
 
     // Create a new SMTP session with default values, split the stream into reader and writer
     // and handle the loop starting the SMTP session
-    let mut session = SMTPSession::new(auth_engine, false);
+    let mut session = SMTPSession::new(auth_engine, auth_required);
     let (reader, writer) = split(stream);
     handle_stream(reader, writer, tls_acceptor, tx, &mut session).await?;
     Ok(())

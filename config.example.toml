@@ -1,0 +1,60 @@
+# Mailsis SMTP Server Configuration
+#
+# Copy this file to config.toml and adjust to your needs.
+# The config path can be overridden via the MAILSIS_CONFIG environment variable.
+
+[smtp]
+host = "127.0.0.1"
+port = 2525
+auth_required = false
+
+[smtp.tls]
+cert = "certs/server.cert.pem"
+key = "certs/server.key.pem"
+
+[smtp.auth]
+credentials_file = "passwords/example.txt"
+
+# ── Handlers ────────────────────────────────────────────────────────
+# Define named message-processing backends here.
+# Each handler has a type ("file_storage" or "redis") and
+# type-specific settings.
+
+# Local filesystem storage
+[smtp.handlers.local]
+type = "file_storage"
+path = "mailbox"           # Relative to project root
+metadata = true            # Store metadata in SQLite
+
+# Redis queue (requires the "redis" feature: cargo build --features redis)
+[smtp.handlers.redis_queue]
+type = "redis"
+url = "redis://127.0.0.1:6379"
+queue = "incoming_emails"
+
+# ── Routing ─────────────────────────────────────────────────────────
+# Rules are evaluated by specificity:
+#   1. Exact address  (address = "user@domain")
+#   2. Domain          (domain  = "domain")
+#   3. Wildcard domain (domain  = "*.domain")
+#   4. Default handler
+#
+# First matching rule wins within each specificity level.
+
+[smtp.routing]
+default = "local"          # Fallback handler when no rule matches
+
+# Route a specific user to Redis
+[[smtp.routing.rules]]
+address = "alerts@example.com"
+handler = "redis_queue"
+
+# Route an entire domain to Redis
+[[smtp.routing.rules]]
+domain = "example.com"
+handler = "redis_queue"
+
+# Route all subdomains of internal.org to local storage
+[[smtp.routing.rules]]
+domain = "*.internal.org"
+handler = "local"

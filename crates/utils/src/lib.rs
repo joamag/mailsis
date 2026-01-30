@@ -1,17 +1,26 @@
 pub mod auth;
+pub mod config;
 pub mod exec;
 pub mod file;
+pub mod handler;
+pub mod handlers;
 pub mod imap;
 pub mod metadata;
 pub mod mime;
+pub mod router;
 pub mod storage;
 pub mod tls;
 
 pub use auth::*;
+pub use config::*;
 pub use exec::*;
 pub use file::*;
+pub use handler::*;
+#[cfg(feature = "redis")]
+pub use handlers::*;
 pub use imap::*;
 pub use metadata::*;
 pub use mime::*;
+pub use router::*;
 pub use storage::*;
 pub use tls::*;

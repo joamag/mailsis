@@ -48,6 +48,7 @@ python imap/examples/smtp_client.py
 - Never bump the internal package version in `Cargo.toml` or `setup.py`. This is handled automatically by the release process.
 - Rust files use LF line endings, while Python files use CRLF.
 - Inline comments should be in the format `// <comment>` and start with uppercase.
+- Inline comments should be written as in "Add support for X" rather than "Adds support for X" or "Added support for X".
 - Always run the format and testing commands after changes
 
 ## License

@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Added unit tests for `MemoryAuthEngine`
 * Added unit tests for `FileStorageEngine`
 * Added unit tests for `MemoryStorageEngine`
+* Documented how to run the SMTP/IMAP servers and example clients in the README
+* Added `MessageHandler` trait for pluggable email processing backends
+* Added `FileStorageHandler` wrapping `FileStorageEngine` for the handler pipeline
+* Added `RedisQueueHandler` for pushing JSON-serialized emails to a Redis list (feature-gated behind `redis`)
+* Added `MessageRouter` with per-address, per-domain, and wildcard domain routing rules
+* Added TOML-based configuration system (`config.toml`) for SMTP server settings, handlers, and routing
+* Added `config.example.toml` with documented configuration examples
 
 ### Changed
 
@@ -34,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * SMTP server now uses `StorageEngine` trait for email storage
 * IMAP server now uses `AuthEngine` trait for authentication
 * IMAP server now uses `StorageEngine` trait for email retrieval
+* SMTP server now uses `MessageRouter` for configurable email routing instead of direct `FileStorageEngine` calls
 * SMTP `MAIL FROM` and `RCPT TO` parsing is now case-insensitive (RFC 5321 compliance)
 * Improved IMAP SELECT/EXAMINE error handling for non-existent mailboxes
 * Performance: Avoid `to_uppercase()` allocation in SMTP prefix matching

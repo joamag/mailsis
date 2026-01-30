@@ -1,0 +1,40 @@
+[smtp]
+host = "127.0.0.1"
+port = 2525
+auth_required = false
+
+[smtp.tls]
+cert = "certs/server.cert.pem"
+key = "certs/server.key.pem"
+
+[smtp.auth]
+credentials_file = "passwords/example.txt"
+
+# Named handlers - define your message processing backends here
+[smtp.handlers.local]
+type = "file_storage"
+path = "mailbox"
+metadata = true
+
+# Uncomment to enable Redis queue handler:
+# [smtp.handlers.redis_queue]
+# type = "redis"
+# url = "redis://127.0.0.1:6379"
+# queue = "incoming_emails"
+
+# Routing - rules evaluated by specificity (exact address > domain > wildcard)
+[smtp.routing]
+default = "local"
+
+# Example routing rules:
+# [[smtp.routing.rules]]
+# address = "admin@example.com"
+# handler = "redis_queue"
+#
+# [[smtp.routing.rules]]
+# domain = "example.com"
+# handler = "redis_queue"
+#
+# [[smtp.routing.rules]]
+# domain = "*.internal.org"
+# handler = "local"
