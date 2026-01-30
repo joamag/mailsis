@@ -1,5 +1,7 @@
 use std::{error::Error, fmt::Display, future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
+use tracing::{debug, error, info};
+
 use crate::{EmailMessage, FileStorageEngine, StorageEngine};
 
 /// Result type for handler operations.
@@ -52,6 +54,11 @@ pub struct FileStorageHandler {
 impl FileStorageHandler {
     /// Creates a new `FileStorageHandler` with the given base path and metadata flag.
     pub fn new(base_path: PathBuf, metadata: bool) -> Self {
+        info!(
+            path = %base_path.display(),
+            metadata = metadata,
+            "File storage handler initialized"
+        );
         let engine = if metadata {
             FileStorageEngine::new(base_path)
         } else {
@@ -71,10 +78,25 @@ impl FileStorageHandler {
 impl MessageHandler for FileStorageHandler {
     fn handle<'a>(&'a self, message: &'a EmailMessage) -> HandlerFuture<'a> {
         Box::pin(async move {
-            self.engine
-                .store(message)
-                .await
-                .map_err(|e| HandlerError::Storage(e.to_string()))?;
+            debug!(
+                message_id = %message.message_id,
+                to = %message.to,
+                "Storing email to filesystem"
+            );
+            self.engine.store(message).await.map_err(|e| {
+                error!(
+                    message_id = %message.message_id,
+                    error = %e,
+                    "Failed to store email to filesystem"
+                );
+                HandlerError::Storage(e.to_string())
+            })?;
+            info!(
+                message_id = %message.message_id,
+                from = %message.from,
+                to = %message.to,
+                "Stored email to filesystem"
+            );
             Ok(())
         })
     }

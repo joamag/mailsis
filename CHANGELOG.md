@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Added structured logging with `tracing` and `tracing-subscriber` (env-filter support via `RUST_LOG`)
 * Added detailed SMTP session logging: connection lifecycle, authentication, envelope (MAIL FROM/RCPT TO/DATA), routing dispatch, and handler registration
+* Added internal logging to `FileStorageHandler` and `RedisQueueHandler` (initialization, success, errors)
+* Added advanced Python SMTP client example (`smtp/examples/smtp_advanced.py`) with CLI options for addresses, content, attachments, TLS, auth, and priority
+* Added module-level documentation to all Python examples (`smtp_client.py`, `smtp_advanced.py`, `imap_client.py`)
+* Added Redis routing documentation to README with Docker usage examples
 * Added modular authentication system with `AuthEngine` trait
 * Added `MemoryAuthEngine` for in-memory credential storage
 * Added `AuthError` enum for authentication error handling
