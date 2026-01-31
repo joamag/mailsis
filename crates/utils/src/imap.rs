@@ -1,3 +1,9 @@
+//! IMAP UID sequence-set parsing.
+//!
+//! IMAP `FETCH` and `SEARCH` commands accept sequence-set strings such as
+//! `"1:*"` or `"5:10"`. This module converts those strings into Rust
+//! ranges following [RFC 9051 §9](https://www.rfc-editor.org/rfc/rfc9051#section-9).
+
 use std::ops::RangeInclusive;
 
 /// Converts a string range from an IMAP UID FETCH command into a range of
@@ -58,4 +64,89 @@ pub fn uid_fetch_range(
     };
 
     Some(start.min(end)..=start.max(end))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uid_fetch_range_str_simple_range() {
+        assert_eq!(uid_fetch_range_str("1:10", 100), Some(1..=10));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_single_uid() {
+        assert_eq!(uid_fetch_range_str("10", 100), Some(10..=10));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_wildcard_end() {
+        assert_eq!(uid_fetch_range_str("1:*", 100), Some(1..=100));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_wildcard_only() {
+        assert_eq!(uid_fetch_range_str("*", 100), Some(100..=100));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_reversed_range() {
+        assert_eq!(uid_fetch_range_str("10:1", 100), Some(1..=10));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_invalid_input() {
+        assert_eq!(uid_fetch_range_str("abc", 100), None);
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_invalid_end() {
+        assert_eq!(uid_fetch_range_str("1:abc", 100), None);
+    }
+
+    #[test]
+    fn test_uid_fetch_range_str_same_start_end() {
+        assert_eq!(uid_fetch_range_str("5:5", 100), Some(5..=5));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_with_end() {
+        assert_eq!(uid_fetch_range("1", Some("10"), 100), Some(1..=10));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_without_end() {
+        assert_eq!(uid_fetch_range("5", None, 100), Some(5..=5));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_wildcard_start() {
+        assert_eq!(uid_fetch_range("*", None, 50), Some(50..=50));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_wildcard_end() {
+        assert_eq!(uid_fetch_range("1", Some("*"), 50), Some(1..=50));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_both_wildcards() {
+        assert_eq!(uid_fetch_range("*", Some("*"), 50), Some(50..=50));
+    }
+
+    #[test]
+    fn test_uid_fetch_range_invalid_start() {
+        assert_eq!(uid_fetch_range("bad", None, 100), None);
+    }
+
+    #[test]
+    fn test_uid_fetch_range_invalid_end() {
+        assert_eq!(uid_fetch_range("1", Some("bad"), 100), None);
+    }
+
+    #[test]
+    fn test_uid_fetch_range_max_uid_zero() {
+        assert_eq!(uid_fetch_range_str("*", 0), Some(0..=0));
+    }
 }

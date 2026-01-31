@@ -9,12 +9,20 @@ keywords = ["email", "smtp", "imap", "server"]
 edition = "2021"
 rust-version = "1.83"
 
+[features]
+default = []
+redis = ["mailsis-utils/redis"]
+email-auth = ["mailsis-utils/email-auth"]
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 base64 = "0.22"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "chrono"] }
 mailsis-utils = { path = "../crates/utils", version = "0.1.0" }
 
 [dev-dependencies]

@@ -1,6 +1,44 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+"""
+Basic SMTP client example for Mailsis.
+
+Generates a random binary file, connects to the Mailsis SMTP server over
+STARTTLS, and sends a test email with the file as an attachment. Prints
+timing information for each step and cleans up the temporary file on exit.
+
+This example uses hardcoded defaults and requires no command-line arguments.
+For a configurable client with CLI options, see ``smtp_advanced.py``.
+
+Constants
+---------
+SMTP_SERVER    SMTP server hostname (default: 127.0.0.1).
+SMTP_PORT      SMTP server port (default: 2525).
+SENDER         Sender email address (default: sender@localhost).
+RECIPIENT      Recipient email address (default: recipient@localhost).
+FILE_SIZE_MB   Size of the generated random attachment in megabytes (default: 1).
+
+Prerequisites
+-------------
+Start the Mailsis SMTP server before running this script::
+
+    cargo run -p mailsis-smtp
+
+Example Usage
+-------------
+Run with default settings::
+
+    python smtp/examples/smtp_client.py
+
+The script will:
+  - Generate a 1 MB random binary file (``random_data.bin``)
+  - Connect to 127.0.0.1:2525 with STARTTLS
+  - Send the email with the attachment
+  - Print elapsed time for each step
+  - Delete the temporary file
+"""
+
 import smtplib
 import os
 import time
@@ -20,8 +58,8 @@ FILE_SIZE_MB = 1
 print(f"Generating random file of {FILE_SIZE_MB} MB...")
 start_time = time.time()
 file_path = "random_data.bin"
-with open(file_path, "wb") as f:
-    f.write(os.urandom(FILE_SIZE_MB * 1024 * 1024))
+with open(file_path, "wb") as file:
+    file.write(os.urandom(FILE_SIZE_MB * 1024 * 1024))
 print(f"File generated in {time.time() - start_time:.2f}s")
 
 # Connect to SMTP server
@@ -43,8 +81,8 @@ msg["Subject"] = "Large File Test"
 body = f"This is a test email with a {FILE_SIZE_MB} MB file attachment."
 msg.attach(MIMEText(body, "plain"))
 
-with open(file_path, "rb") as f:
-    attachment = MIMEApplication(f.read(), Name="random_data.bin")
+with open(file_path, "rb") as file:
+    attachment = MIMEApplication(file.read(), Name="random_data.bin")
     attachment["Content-Disposition"] = 'attachment; filename="random_data.bin"'
     msg.attach(attachment)
 

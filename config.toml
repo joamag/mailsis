@@ -1,0 +1,95 @@
+# Mailsis SMTP Server Configuration
+#
+# Copy this file to config.toml and adjust to your needs.
+# The config path can be overridden via the MAILSIS_CONFIG environment variable.
+
+# -- Server ---------------------------------------------------------
+
+[smtp]
+host = "127.0.0.1"             # Address to bind
+port = 2525                    # Port to listen on
+auth_required = false          # Require AUTH before MAIL FROM (global default)
+
+# -- TLS ------------------------------------------------------------
+
+[smtp.tls]
+cert = "certs/server.cert.pem"
+key = "certs/server.key.pem"
+
+# -- Authentication -------------------------------------------------
+
+[smtp.auth]
+credentials_file = "passwords/example.txt"   # One "user:password" per line
+
+# -- Handlers -------------------------------------------------------
+#
+# Named message-processing backends. Each handler has a "type" and
+# type-specific settings. Reference handlers by name in routing rules.
+
+# Local filesystem storage (always available)
+[smtp.handlers.local]
+type = "file_storage"
+path = "mailbox"               # Relative to project root
+metadata = true                # Store metadata in SQLite
+
+# Redis queue (requires: cargo build --features redis)
+# [smtp.handlers.redis_queue]
+# type = "redis"
+# url = "redis://127.0.0.1:6379"
+# queue = "incoming_emails"
+
+# -- Routing --------------------------------------------------------
+#
+# Routes incoming emails to handlers based on the recipient address.
+# Rules are evaluated by specificity:
+#
+#   1. Exact address   (address = "user@domain")
+#   2. Domain          (domain  = "domain")
+#   3. Wildcard domain (domain  = "*.domain")
+#   4. Default handler (fallback)
+#
+# The first matching rule wins. If no rule matches, the default
+# handler is used.
+#
+# Each rule may also set:
+#   auth_required   Override the global auth setting for this recipient
+#   transformers    Override the default transformer list for this rule
+
+[smtp.routing]
+default = "local"
+
+# -- Transformers (default) -----------------------------------------
+#
+# Transformers modify messages in the pipeline before they reach a
+# handler. The list below applies to all routed messages unless a
+# rule overrides it with its own "transformers" section.
+#
+# Available types:
+#   message_id   Ensures a Message-ID header exists; syncs or injects one
+
+# [[smtp.routing.transformers]]
+# type = "message_id"
+# domain = "example.com"
+
+# -- Routing Rules --------------------------------------------------
+
+# Route a specific address to Redis (requires authentication)
+# [[smtp.routing.rules]]
+# address = "alerts@example.com"
+# handler = "redis_queue"
+# auth_required = true
+
+# Route an entire domain to Redis (with per-rule transformer override)
+# [[smtp.routing.rules]]
+# domain = "example.com"
+# handler = "redis_queue"
+#
+#   [[smtp.routing.rules.transformers]]
+#   type = "message_id"
+#   domain = "example.com"
+
+# Route all subdomains to local storage (skip authentication)
+# [[smtp.routing.rules]]
+# domain = "*.internal.org"
+# handler = "local"
+# auth_required = false

@@ -1,3 +1,9 @@
+//! Storage engine traits and implementations for persisting email messages.
+//!
+//! Provides [`StorageEngine`] as the abstract interface, with
+//! [`FileStorageEngine`] (filesystem-backed) and [`MemoryStorageEngine`]
+//! (in-memory, for testing) as concrete implementations.
+
 use std::{collections::HashMap, error::Error, fmt::Display, io, path::PathBuf, sync::RwLock};
 
 use chrono::Utc;
@@ -5,9 +11,8 @@ use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
 };
-use uuid::Uuid;
 
-use crate::{parse_mime_headers, EmailMetadata};
+use crate::{EmailMessage, EmailMetadata};
 
 /// Result type for storage operations.
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -27,7 +32,7 @@ impl Display for StorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StorageError::NotFound => write!(f, "Message not found"),
-            StorageError::Io(e) => write!(f, "I/O error: {e}"),
+            StorageError::Io(error) => write!(f, "I/O error: {error}"),
             StorageError::EngineError(msg) => write!(f, "Storage error: {msg}"),
         }
     }
@@ -36,67 +41,11 @@ impl Display for StorageError {
 impl Error for StorageError {}
 
 impl From<io::Error> for StorageError {
-    fn from(e: io::Error) -> Self {
-        if e.kind() == io::ErrorKind::NotFound {
+    fn from(error: io::Error) -> Self {
+        if error.kind() == io::ErrorKind::NotFound {
             StorageError::NotFound
         } else {
-            StorageError::Io(e)
-        }
-    }
-}
-
-/// Represents an email message for storage operations.
-#[derive(Debug, Clone)]
-pub struct EmailMessage {
-    /// Unique message identifier, RFC 5322 message-id format.
-    pub message_id: String,
-
-    /// Sender address, RFC 5322 address format.
-    pub from: String,
-
-    /// Recipient address, RFC 5322 address format.
-    pub to: String,
-
-    /// Email subject, ASCII encoded.
-    pub subject: String,
-
-    /// Raw email body/content, ASCII encoded.
-    pub body: String,
-}
-
-impl EmailMessage {
-    pub fn new(from: String, to: String, body: String) -> Self {
-        let message_id = Uuid::new_v4().to_string();
-        let subject = parse_mime_headers(&body)
-            .ok()
-            .and_then(|h| h.get("Subject").cloned())
-            .unwrap_or_default();
-        Self {
-            message_id,
-            from,
-            to,
-            subject,
-            body,
-        }
-    }
-
-    pub fn from_raw(from: &str, to: &str, body: &str) -> Self {
-        Self::new(from.to_string(), to.to_string(), body.to_string())
-    }
-
-    pub fn with_id(
-        message_id: String,
-        from: String,
-        to: String,
-        subject: String,
-        body: String,
-    ) -> Self {
-        Self {
-            message_id,
-            from,
-            to,
-            subject,
-            body,
+            StorageError::Io(error)
         }
     }
 }
@@ -188,13 +137,6 @@ impl FileStorageEngine {
     fn message_path(&self, user: &str, message_id: &str) -> PathBuf {
         self.user_path(user).join(format!("{message_id}.eml"))
     }
-
-    /// Checks if the email body has valid MIME headers.
-    async fn is_mime_valid(body: &str) -> bool {
-        let start = body.chars().take(1024).collect::<String>();
-        let headers = ["From:", "To:", "Subject:", "Date:", "MIME-Version:"];
-        headers.iter().any(|h| start.contains(h))
-    }
 }
 
 impl StorageEngine for FileStorageEngine {
@@ -206,7 +148,7 @@ impl StorageEngine for FileStorageEngine {
         let mut file = File::create(&file_path).await?;
 
         // Add minimal headers if not a valid MIME message
-        if !Self::is_mime_valid(&message.body).await {
+        if !message.has_headers() {
             file.write_all(format!("From: {}\r\n", message.from).as_bytes())
                 .await?;
             file.write_all(format!("To: {}\r\n", message.to).as_bytes())
@@ -214,7 +156,8 @@ impl StorageEngine for FileStorageEngine {
             file.write_all(format!("Date: {}\r\n\r\n", Utc::now().to_rfc2822()).as_bytes())
                 .await?;
         }
-        file.write_all(message.body.as_bytes()).await?;
+        file.write_all(message.raw().as_bytes()).await?;
+        file.flush().await?;
 
         // Store metadata if enabled
         if self.store_metadata {
@@ -222,13 +165,13 @@ impl StorageEngine for FileStorageEngine {
                 message.message_id.clone(),
                 message.from.clone(),
                 message.to.clone(),
-                message.subject.clone(),
+                message.subject().to_string(),
                 file_path,
             );
             metadata
                 .store_sqlite(&self.db_path)
                 .await
-                .map_err(|e| StorageError::EngineError(e.to_string()))?;
+                .map_err(|error| StorageError::EngineError(error.to_string()))?;
         }
 
         Ok(message.message_id.clone())
@@ -357,7 +300,7 @@ impl StorageEngine for MemoryStorageEngine {
         let message = user_messages
             .get(message_id)
             .ok_or(StorageError::NotFound)?;
-        Ok(message.body.clone())
+        Ok(message.raw().to_string())
     }
 
     async fn list(&self, user: &str) -> StorageResult<Vec<String>> {
@@ -394,9 +337,7 @@ impl StorageEngine for MemoryStorageEngine {
 mod tests {
     use tempfile::TempDir;
 
-    use super::{
-        EmailMessage, FileStorageEngine, MemoryStorageEngine, StorageEngine, StorageError,
-    };
+    use super::*;
 
     #[tokio::test]
     async fn test_file_storage_store_and_retrieve() {
@@ -714,7 +655,8 @@ mod tests {
             .retrieve("recipient@example.com", "custom-id-123")
             .await
             .unwrap();
-        assert_eq!(content, "Test body content");
+        assert!(content.contains("Test body content"));
+        assert!(content.contains("Subject: Test Subject"));
     }
 
     #[tokio::test]

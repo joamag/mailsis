@@ -10,16 +10,12 @@ jobs:
     strategy:
       matrix:
         rust-version: [
-          "1.83.0",
-          "1.84.0",
-          "1.85.0",
-          "1.86.0",
-          "1.87.0",
           "1.88.0",
           "1.89.0",
           "1.90.0",
           "1.91.0",
           "1.92.0",
+          "1.93.0",
           "latest",
         ]
     runs-on: ubuntu-latest
@@ -39,6 +35,16 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings -A unknown-lints
       - name: Run unit tests
         run: cargo test
+      - name: Install coverage tools
+        run: |
+          cargo install cargo-llvm-cov
+          rustup component add llvm-tools-preview
+      - name: Coverage report (utils library)
+        run: cargo llvm-cov --all-features --all-targets --package mailsis-utils
+      - name: Coverage report (SMTP)
+        run: cargo llvm-cov --all-features --all-targets --package mailsis-smtp
+      - name: Coverage report (IMAP)
+        run: cargo llvm-cov --all-features --all-targets --package mailsis-imap
       - name: Build development version
         run: cargo build --all-targets
       - name: Build release version

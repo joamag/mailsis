@@ -1,6 +1,47 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+"""
+Basic IMAP client example for Mailsis.
+
+Connects to the Mailsis IMAP server, logs in, selects the INBOX, and
+fetches the latest email message. Prints the subject line and the
+plain-text body of the message.
+
+This example uses hardcoded defaults and requires no command-line arguments.
+
+Constants
+---------
+IMAP_SERVER      IMAP server hostname (default: 127.0.0.1).
+IMAP_PORT        IMAP server port (default: 1430).
+EMAIL_ACCOUNT    Login email address (default: recipient@localhost).
+PASSWORD         Login password (default: password).
+
+Prerequisites
+-------------
+Start the Mailsis IMAP server before running this script::
+
+    cargo run -p mailsis-imap
+
+You should also have at least one email in the mailbox. Send one using the
+SMTP example first::
+
+    cargo run -p mailsis-smtp          # start SMTP server in another terminal
+    python smtp/examples/smtp_client.py
+
+Example Usage
+-------------
+Read the latest email from INBOX::
+
+    python imap/examples/imap_client.py
+
+The script will:
+  - Connect to 127.0.0.1:1430
+  - Log in as recipient@localhost
+  - Select INBOX (read-only)
+  - Fetch and display the latest message's subject and plain-text body
+"""
+
 import imaplib
 import email
 from email.header import decode_header

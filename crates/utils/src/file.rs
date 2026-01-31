@@ -1,3 +1,9 @@
+//! Async file I/O helpers for large payloads.
+//!
+//! Email attachments can be arbitrarily large, so file reads and writes
+//! go through async, chunked helpers here to avoid blocking the Tokio
+//! runtime. Also includes random-file generation for test fixtures.
+
 use std::{io::Error, path::Path};
 
 use rand::Rng;
@@ -32,6 +38,7 @@ pub async fn generate_random_file(path: impl AsRef<Path>, size_mb: usize) -> Res
         AsyncWriteExt::write_all(&mut file, &chunk).await?;
     }
 
+    file.flush().await?;
     Ok(())
 }
 
@@ -44,4 +51,89 @@ pub async fn generate_random_bytes(size: usize) -> Result<Vec<u8>, Error> {
     let mut bytes = vec![0u8; size];
     rng.fill(&mut bytes[..]);
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_read_large_file_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        tokio::fs::write(&file_path, b"Hello, World!")
+            .await
+            .unwrap();
+
+        let content = read_large_file(&file_path).await.unwrap();
+        assert_eq!(content, b"Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn test_read_large_file_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("empty.txt");
+        tokio::fs::write(&file_path, b"").await.unwrap();
+
+        let content = read_large_file(&file_path).await.unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_large_file_not_found() {
+        let result = read_large_file("/nonexistent/path/file.txt").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_generate_random_file_creates_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("random.bin");
+
+        generate_random_file(&file_path, 1).await.unwrap();
+
+        let content = tokio::fs::read(&file_path).await.unwrap();
+        assert_eq!(content.len(), 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn test_generate_random_file_zero_size() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("empty_random.bin");
+
+        generate_random_file(&file_path, 0).await.unwrap();
+
+        let content = tokio::fs::read(&file_path).await.unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_random_bytes_size() {
+        let bytes = generate_random_bytes(256).await.unwrap();
+        assert_eq!(bytes.len(), 256);
+    }
+
+    #[tokio::test]
+    async fn test_generate_random_bytes_zero_size() {
+        let bytes = generate_random_bytes(0).await.unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_random_bytes_not_all_zeros() {
+        let bytes = generate_random_bytes(1024).await.unwrap();
+        assert!(bytes.iter().any(|&byte| byte != 0));
+    }
+
+    #[tokio::test]
+    async fn test_read_large_file_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("roundtrip.bin");
+
+        generate_random_file(&file_path, 1).await.unwrap();
+        let content = read_large_file(&file_path).await.unwrap();
+        assert_eq!(content.len(), 1024 * 1024);
+    }
 }

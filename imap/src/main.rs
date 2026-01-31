@@ -8,6 +8,7 @@ use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
+use tracing::{debug, error, info};
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 1430;
@@ -261,7 +262,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
             self.storage_engine
                 .create_mailbox(self.safe_username(), &mailbox)
                 .await
-                .map_err(|e| format!("Failed to create mailbox: {e}"))?;
+                .map_err(|error| format!("Failed to create mailbox: {error}"))?;
             self.write_response(writer, tag, "OK", "CREATE completed")
                 .await?;
         } else {
@@ -375,7 +376,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
             .storage_engine
             .list(self.safe_username())
             .await
-            .map_err(|e| format!("Failed to list messages: {e}"))?;
+            .map_err(|error| format!("Failed to list messages: {error}"))?;
         Ok(messages)
     }
 
@@ -384,12 +385,12 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
             .storage_engine
             .retrieve(self.safe_username(), message_id)
             .await
-            .map_err(|e| format!("Failed to fetch message: {e}"))?;
+            .map_err(|error| format!("Failed to fetch message: {error}"))?;
         Ok(content)
     }
 
     async fn write_raw<W: AsyncWrite + Unpin>(&self, writer: &mut W, data: &str) {
-        println!(">> [DATA] {} bytes", data.len());
+        debug!(bytes = data.len(), ">> [DATA]");
         writer.write_all(data.as_bytes()).await.ok();
     }
 
@@ -413,7 +414,7 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
         result: &str,
         message: &str,
     ) -> Result<(), Box<dyn Error>> {
-        println!(">> {tag} {result} {message}");
+        debug!(">> {tag} {result} {message}");
         self.write_inner(w, tag, result, message).await;
         Ok(())
     }
@@ -429,6 +430,16 @@ impl<A: AuthEngine, S: StorageEngine> IMAPSession<A, S> {
 /// and spawns a new task to handle each client.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+            "%Y-%m-%d %H:%M:%S".to_string(),
+        ))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let crate_root = get_crate_root().unwrap_or_else(|_| PathBuf::from("."));
     let host = std::env::var("HOST").unwrap_or_else(|_| HOST.to_string());
     let port: u16 = std::env::var("PORT")
@@ -436,20 +447,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .parse()
         .unwrap();
     let listening = format!("{host}:{port}");
-    let listener = TcpListener::bind(&listening).await?;
+    let listener = TcpListener::bind(&listening).await.map_err(|error| {
+        error!(address = %listening, error = %error, "Failed to bind TCP listener");
+        error
+    })?;
 
-    let auth_engine = Arc::new(load_credentials("passwords/example.txt")?);
+    let auth_engine = Arc::new(load_credentials("passwords/example.txt").map_err(|error| {
+        error!(error = %error, "Failed to load credentials");
+        error
+    })?);
     let storage_engine = Arc::new(FileStorageEngine::new(crate_root.join("mailbox")));
 
-    println!("Mailsis-IMAP running on {}", &listening);
+    info!(address = %listening, "Mailsis-IMAP started");
 
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = listener.accept().await.map_err(|error| {
+            error!(error = %error, "Failed to accept connection");
+            error
+        })?;
         let auth_engine = auth_engine.clone();
         let storage_engine = storage_engine.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream, auth_engine, storage_engine).await {
-                eprintln!("Error: {e}");
+            if let Err(error) = handle_client(stream, auth_engine, storage_engine).await {
+                error!(error = %error, "IMAP session failed");
             }
         });
     }
@@ -477,7 +497,7 @@ async fn handle_client<A: AuthEngine + 'static, S: StorageEngine + 'static>(
         }
 
         let raw = line.trim_end();
-        println!("<< {raw}");
+        debug!("<< {raw}");
 
         let parts: Vec<&str> = raw.split_whitespace().collect();
         if parts.len() < 2 {
@@ -504,4 +524,283 @@ async fn handle_client<A: AuthEngine + 'static, S: StorageEngine + 'static>(
 /// ```
 fn load_credentials(path: &str) -> std::io::Result<MemoryAuthEngine> {
     MemoryAuthEngine::from_file(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use mailsis_utils::{MemoryAuthEngine, MemoryStorageEngine, StorageEngine};
+    use tokio::io::{duplex, AsyncReadExt, BufReader};
+
+    use super::*;
+
+    fn test_session() -> IMAPSession<MemoryAuthEngine, MemoryStorageEngine> {
+        let mut map = HashMap::new();
+        map.insert("user".to_string(), "pass".to_string());
+        let auth = Arc::new(MemoryAuthEngine::from_map(map));
+        let storage = Arc::new(MemoryStorageEngine::new());
+        IMAPSession::new(auth, storage)
+    }
+
+    #[tokio::test]
+    async fn test_imap_login_success() {
+        let mut session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "LOGIN", "user", "pass"];
+        session
+            .handle_login(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(session.authenticated);
+        assert_eq!(session.username.as_deref(), Some("user"));
+        assert!(output.contains("A1 OK LOGIN completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_login_failure() {
+        let mut session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "LOGIN", "user", "wrong"];
+        session
+            .handle_login(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(!session.authenticated);
+        assert!(output.contains("A1 NO Invalid credentials"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_login_bad_syntax() {
+        let mut session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "LOGIN", "user"];
+        session
+            .handle_login(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("A1 BAD Invalid login syntax"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_logout() {
+        let mut session = test_session();
+        session.authenticated = true;
+        session.username = Some("user".to_string());
+        session.mailbox = Some("INBOX".to_string());
+        session.safe_username = Some("user".to_string());
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_logout(&mut server, "A1").await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(!session.authenticated);
+        assert!(session.username.is_none());
+        assert!(session.mailbox.is_none());
+        assert!(session.safe_username.is_none());
+        assert!(output.contains("A1 OK LOGOUT completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_capability() {
+        let mut session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_capability(&mut server, "A1").await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("CAPABILITY IMAP4rev1 AUTH=PLAIN"));
+        assert!(output.contains("A1 OK CAPABILITY completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_noop() {
+        let mut session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_noop(&mut server, "A1").await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "A1 OK NOOP completed\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_imap_unknown_command() {
+        let mut session = test_session();
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, _client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let parts = vec!["A1", "XYZZY"];
+
+        session
+            .handle_command(&mut reader, &mut server_write, "A1", "XYZZY", &parts)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("A1 BAD Unknown command (XYZZY)"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_select_empty_mailbox() {
+        let mut session = test_session();
+        session.safe_username = Some("user".to_string());
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "SELECT", "INBOX"];
+        session
+            .handle_select(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("0 EXISTS"));
+        assert!(output.contains("A1 OK SELECT completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_select_success() {
+        let mut session = test_session();
+        session.safe_username = Some("testuser".to_string());
+        session
+            .storage_engine
+            .create_mailbox("testuser", "INBOX")
+            .await
+            .unwrap();
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "SELECT", "INBOX"];
+        session
+            .handle_select(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("FLAGS"));
+        assert!(output.contains("EXISTS"));
+        assert!(output.contains("A1 OK SELECT completed"));
+        assert_eq!(session.mailbox.as_deref(), Some("INBOX"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_list() {
+        let mut session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "LIST", "\"\"", "\"*\""];
+        session
+            .handle_list(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("LIST"));
+        assert!(output.contains("INBOX"));
+        assert!(output.contains("A1 OK LIST completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_create() {
+        let mut session = test_session();
+        session.safe_username = Some("testuser".to_string());
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "CREATE", "Drafts"];
+        session
+            .handle_create(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("A1 OK CREATE completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_search_empty() {
+        let mut session = test_session();
+        session.safe_username = Some("testuser".to_string());
+        session
+            .storage_engine
+            .create_mailbox("testuser", "INBOX")
+            .await
+            .unwrap();
+
+        let (mut client, mut server) = duplex(1024);
+        let parts = vec!["A1", "SEARCH", "ALL"];
+        session
+            .handle_search(&mut server, "A1", &parts)
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("SEARCH"));
+        assert!(output.contains("A1 OK SEARCH completed"));
+    }
+
+    #[tokio::test]
+    async fn test_imap_write_response_format() {
+        let session = test_session();
+
+        let (mut client, mut server) = duplex(1024);
+        session
+            .write_response(&mut server, "A1", "OK", "Done")
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "A1 OK Done\r\n");
+    }
+
+    #[test]
+    fn test_imap_safe_username() {
+        let mut session = test_session();
+        assert_eq!(session.safe_username(), "");
+
+        session.safe_username = Some("user_at_example".to_string());
+        assert_eq!(session.safe_username(), "user_at_example");
+    }
+
+    #[test]
+    fn test_load_credentials_not_found() {
+        let result = load_credentials("/nonexistent/path.txt");
+        assert!(result.is_err());
+    }
 }
