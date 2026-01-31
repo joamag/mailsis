@@ -1,0 +1,43 @@
+name: Deploy Workflow
+on:
+  push:
+    tags:
+      - "*"
+jobs:
+  build:
+    name: Build
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        rust-version: ["1.93.0"]
+    runs-on: ubuntu-latest
+    container: rust:${{ matrix.rust-version }}
+    steps:
+      - name: Checkout code from repository
+        uses: actions/checkout@v6
+      - name: Install Rust components
+        run: |
+          rustup component add rustfmt
+          rustup component add clippy
+      - name: Print Rust information
+        run: rustc --version
+      - name: Verify Rust code format
+        run: cargo fmt --all -- --check
+      - name: Verify Rust code linting
+        run: cargo clippy --all-targets -- -D warnings -A unknown-lints
+      - name: Run unit tests
+        run: cargo test
+      - name: Build release version
+        run: cargo build --release --all-targets
+      - name: Deploy utils package to Crates
+        run: cargo publish --package mailsis-utils --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+      - name: Deploy SMTP package to Crates
+        run: cargo publish --package mailsis-smtp --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+      - name: Deploy IMAP package to Crates
+        run: cargo publish --package mailsis-imap --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
