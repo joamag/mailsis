@@ -157,6 +157,7 @@ impl StorageEngine for FileStorageEngine {
                 .await?;
         }
         file.write_all(message.raw().as_bytes()).await?;
+        file.flush().await?;
 
         // Store metadata if enabled
         if self.store_metadata {
