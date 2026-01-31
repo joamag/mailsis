@@ -2,7 +2,7 @@
 //!
 //! Checks each message against the sender's published DNS policies and
 //! prepends an `Authentication-Results` header with the outcome. Results
-//! are informational — messages are never rejected. Feature-gated behind
+//! are informational - messages are never rejected. Feature-gated behind
 //! `email-auth`.
 
 use mail_auth::{
@@ -15,7 +15,7 @@ use crate::{EmailMessage, MessageTransformer, TransformFuture};
 
 /// Transformer that verifies SPF, DKIM, and DMARC authentication for incoming emails.
 ///
-/// Results are informational only — an `Authentication-Results` header is prepended
+/// Results are informational only, an `Authentication-Results` header is prepended
 /// to the message body and results are logged. Messages are never rejected.
 pub struct EmailAuthTransformer {
     /// The authserv-id used in the Authentication-Results header (typically the server hostname).
@@ -82,7 +82,7 @@ impl MessageTransformer for EmailAuthTransformer {
                 "SPF verification"
             );
 
-            // DKIM verification — use the original raw body to preserve
+            // DKIM verification, use the original raw body to preserve
             // the exact byte sequence the sender signed.
             let dkim_str = if let Some(authenticated_message) =
                 AuthenticatedMessage::parse(message.original_raw().as_bytes())

@@ -146,7 +146,7 @@ impl EmailMessage {
 
     /// Prepends a header to the beginning of the header list.
     ///
-    /// The cached [`raw`](Self::raw) field is **not** updated automatically — call
+    /// The cached [`raw`](Self::raw) field is **not** updated automatically, call
     /// [`rebuild`](Self::rebuild) once after all header modifications are done
     /// (e.g. after running all transformers via [`MessageTransformer::apply`]).
     pub fn prepend_header(&mut self, name: &str, value: &str) {

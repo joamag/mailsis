@@ -1,7 +1,7 @@
 //! Delivery backend abstraction for incoming email messages.
 //!
-//! Every destination that can receive an email — filesystem storage, a Redis
-//! queue, etc. — implements the [`MessageHandler`] trait defined here.
+//! Every destination that can receive an email - filesystem storage, a Redis
+//! queue, etc. - implements the [`MessageHandler`] trait defined here.
 //! The trait is object-safe so that the router can dispatch dynamically.
 
 use std::{error::Error, fmt::Display, future::Future, pin::Pin};

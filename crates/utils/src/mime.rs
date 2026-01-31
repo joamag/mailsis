@@ -1,7 +1,7 @@
 //! MIME validation and raw header parsing.
 //!
 //! Incoming messages need their headers inspected at several points in the
-//! pipeline — to check for a `MIME-Version` header per
+//! pipeline, to check for a `MIME-Version` header per
 //! [RFC 2045](https://www.rfc-editor.org/rfc/rfc2045), to extract
 //! structured key-value pairs, or to split headers from the body.
 
