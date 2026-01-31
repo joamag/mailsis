@@ -78,6 +78,19 @@ cargo clippy --all-features --all-targets -- -D warnings -A unknown-lints
 - Document each Rust module with module-level documentation comments (`//!`).
 - Try to avoid super single letter variable names like `e`, even in the context of `map` and `map_err` closures - use moa bit more descriptive names like `error`, `line`, `part`, etc.
 
+
+## New Release
+
+To create a new release follow the following steps:
+
+- Make sure that both the tests pass and the code formatting are valid.
+- Increment (look at `CHANGELOG.md` for semver changes) the `version` value in `smtp/Cargo.toml`, `imap/Cargo.toml` and `crates/util/Cargo.toml`.
+- Move all the `CHANGELOG.md` Unreleased items that have at least one non empty item the into a new section with the new version number and date, and then create new empty sub-sections (Added, Changed and Fixed) for the Unreleased section with a single empty item.
+- Create a commit with the following message `version: $VERSION_NUMBER`.
+- Push the commit.
+- Create a new tag with the value fo the new version number `$VERSION_NUMBER`.
+- Create a new release on the GitHub repo using the Markdown from the corresponding version entry in `CHANGELOG.md` as the description of the release and the version number as the title. Do not include the title of the release (version and date) in the description.
+
 ## License
 
 Mailsis is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/).
