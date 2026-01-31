@@ -1,3 +1,10 @@
+//! Credential verification for SMTP and IMAP sessions.
+//!
+//! Both the SMTP `AUTH LOGIN` flow and the IMAP `LOGIN` command delegate
+//! to an [`AuthEngine`] implementation. The crate ships with
+//! [`MemoryAuthEngine`], which can be loaded from a plaintext credentials
+//! file or constructed in-memory for tests.
+
 use std::{collections::HashMap, fmt::Display, fs::read_to_string, io, sync::Arc};
 
 /// Result type for authentication operations.

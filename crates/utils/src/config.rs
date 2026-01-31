@@ -1,3 +1,10 @@
+//! TOML configuration loading for the SMTP server.
+//!
+//! The server reads a single `config.toml` file at startup to determine
+//! bind address, TLS certificates, credential sources, handler backends,
+//! and per-domain routing rules. [`load_config`] parses the file into
+//! a strongly-typed [`Config`] hierarchy.
+
 use std::{collections::HashMap, fs, path::Path};
 
 use serde::Deserialize;

@@ -1,3 +1,10 @@
+//! TLS certificate and key loading for STARTTLS support.
+//!
+//! The SMTP server upgrades plain-text connections to TLS via STARTTLS.
+//! This module reads PEM certificate chains and private keys from disk
+//! and builds the rustls configurations used by both the server listener
+//! and any outbound client connections.
+
 use std::{error::Error, fs::File, io::BufReader, path::PathBuf, str::FromStr};
 
 use rustls::{

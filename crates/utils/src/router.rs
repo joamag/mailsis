@@ -1,3 +1,10 @@
+//! Recipient-based message routing for the SMTP pipeline.
+//!
+//! When an email arrives, the router decides which delivery handler should
+//! process it by matching the recipient address against a prioritized list
+//! of rules (exact address, domain, wildcard domain). Unmatched recipients
+//! fall through to a configurable default handler.
+
 use std::sync::Arc;
 
 use crate::{

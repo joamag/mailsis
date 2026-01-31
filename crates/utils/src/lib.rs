@@ -1,3 +1,9 @@
+//! Shared utilities for the Mailsis mail server.
+//!
+//! This crate provides the core building blocks used by the SMTP and IMAP
+//! binaries: authentication engines, message types, routing, storage,
+//! TLS configuration, and email transformers.
+
 pub mod auth;
 pub mod config;
 pub mod exec;

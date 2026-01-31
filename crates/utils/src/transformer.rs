@@ -1,3 +1,11 @@
+//! In-pipeline email message transformations.
+//!
+//! Transformers run after the SMTP `DATA` phase and before routing,
+//! allowing headers to be injected, authentication results to be checked,
+//! or other modifications to be applied to an [`EmailMessage`] in place.
+//! Concrete implementations live in the [`transformers`](crate::transformers)
+//! module.
+
 use std::{future::Future, pin::Pin};
 
 use tracing::debug;

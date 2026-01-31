@@ -1,3 +1,10 @@
+//! Ensure every email carries a `Message-ID` MIME header.
+//!
+//! Some clients omit the `Message-ID` header, which breaks threading and
+//! de-duplication in downstream systems. This transformer inspects the
+//! incoming email: if a `Message-ID` already exists it is preserved,
+//! otherwise one is generated using the configured domain.
+
 use tracing::{debug, info};
 
 use crate::{EmailMessage, MessageTransformer, TransformFuture};

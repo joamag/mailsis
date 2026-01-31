@@ -1,3 +1,10 @@
+//! SPF, DKIM, and DMARC verification for incoming emails.
+//!
+//! Checks each message against the sender's published DNS policies and
+//! prepends an `Authentication-Results` header with the outcome. Results
+//! are informational — messages are never rejected. Feature-gated behind
+//! `email-auth`.
+
 use mail_auth::{
     dmarc::verify::DmarcParameters, spf::verify::SpfParameters, AuthenticatedMessage, DkimResult,
     DmarcResult, MessageAuthenticator, SpfResult,

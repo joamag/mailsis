@@ -1,3 +1,9 @@
+//! IMAP UID sequence-set parsing.
+//!
+//! IMAP `FETCH` and `SEARCH` commands accept sequence-set strings such as
+//! `"1:*"` or `"5:10"`. This module converts those strings into Rust
+//! ranges following [RFC 9051 §9](https://www.rfc-editor.org/rfc/rfc9051#section-9).
+
 use std::ops::RangeInclusive;
 
 /// Converts a string range from an IMAP UID FETCH command into a range of

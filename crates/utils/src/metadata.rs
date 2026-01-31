@@ -1,3 +1,9 @@
+//! SQLite-backed email metadata index.
+//!
+//! After an email is stored on disk, its envelope data (sender, recipient,
+//! subject, file path) is recorded in a local SQLite database so that the
+//! IMAP server can list and search messages without scanning the filesystem.
+
 use std::{
     error::Error,
     path::{Path, PathBuf},

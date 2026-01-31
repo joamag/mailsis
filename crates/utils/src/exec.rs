@@ -1,3 +1,9 @@
+//! Workspace root discovery at runtime.
+//!
+//! The server needs to locate configuration files and TLS certificates
+//! relative to the project root. [`get_crate_root`] resolves this by
+//! walking up from the running executable past the `target/` directory.
+
 use std::{env, error::Error, path::PathBuf};
 
 /// Returns the root directory of the crate, using the current executable path

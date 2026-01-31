@@ -1,3 +1,9 @@
+//! Async file I/O helpers for large payloads.
+//!
+//! Email attachments can be arbitrarily large, so file reads and writes
+//! go through async, chunked helpers here to avoid blocking the Tokio
+//! runtime. Also includes random-file generation for test fixtures.
+
 use std::{io::Error, path::Path};
 
 use rand::Rng;
