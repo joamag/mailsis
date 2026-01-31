@@ -911,4 +911,322 @@ mod tests {
         assert!(session.rcpts.contains("recipient@example.com"));
         assert_eq!(output, "250 OK\r\n250 OK\r\n");
     }
+
+    #[tokio::test]
+    async fn test_handle_auth_login_failure() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let encoded_user = STANDARD.encode("user");
+        let encoded_pass = STANDARD.encode("wrong");
+        let input = format!("{encoded_user}\r\n{encoded_pass}\r\n");
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, mut client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let write_task = tokio::spawn(async move {
+            client_write.write_all(input.as_bytes()).await.unwrap();
+            drop(client_write);
+        });
+
+        let mut line = String::new();
+        session
+            .handle_auth_login(&mut reader, &mut server_write, &mut line)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+        write_task.await.unwrap();
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(!session.authenticated);
+        assert!(output.contains("535 Authentication failed"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_auth_with_username() {
+        let mut map = HashMap::new();
+        map.insert("admin".to_string(), "secret".to_string());
+        let auth_engine = Arc::new(MemoryAuthEngine::from_map(map));
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let encoded_user = STANDARD.encode("admin");
+        let encoded_pass = STANDARD.encode("secret");
+        let input = format!("{encoded_pass}\r\n");
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, mut client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let write_task = tokio::spawn(async move {
+            client_write.write_all(input.as_bytes()).await.unwrap();
+            drop(client_write);
+        });
+
+        let mut line = String::new();
+        session
+            .handle_auth_with_username(
+                &mut reader,
+                &mut server_write,
+                &mut line,
+                &format!(" {encoded_user}"),
+            )
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+        write_task.await.unwrap();
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(session.authenticated);
+        assert!(output.contains("235 Authentication successful"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_mail_auth_required() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, true, test_router(), None);
+
+        let (mut client, mut server) = duplex(1024);
+        session
+            .handle_mail(&mut server, "FROM:<sender@example.com>")
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("530 Authentication required"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_mail_syntax_error() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_mail(&mut server, "INVALID").await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("501 Syntax error"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_rcpt_syntax_error() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_rcpt(&mut server, "INVALID").await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("501 Syntax error"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_data_no_recipients() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, _client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let (tx, _rx) = mpsc::channel(10);
+
+        session
+            .handle_data(&mut reader, &mut server_write, &tx)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("554 No valid recipients"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_data_auth_required() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, true, test_router(), None);
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, _client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let (tx, _rx) = mpsc::channel(10);
+
+        session
+            .handle_data(&mut reader, &mut server_write, &tx)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("530 Authentication required"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_data_success() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+        session.from = "sender@example.com".to_string();
+        session.rcpts.insert("rcpt@example.com".to_string());
+
+        let body = "Subject: Hello\r\n\r\nBody text\r\n.\r\n";
+
+        let (client, server) = duplex(4096);
+        let (mut client_read, mut client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let (tx, mut rx) = mpsc::channel(10);
+
+        let write_task = tokio::spawn(async move {
+            client_write.write_all(body.as_bytes()).await.unwrap();
+            drop(client_write);
+        });
+
+        session
+            .handle_data(&mut reader, &mut server_write, &tx)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+        write_task.await.unwrap();
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("354 End data"));
+        assert!(output.contains("250 Message accepted"));
+
+        let incoming = rx.recv().await.unwrap();
+        assert!(incoming.rcpts.contains("rcpt@example.com"));
+        assert_eq!(incoming.from, "sender@example.com");
+        assert!(incoming.raw.contains("Body text"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_rset() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+        session.from = "sender@example.com".to_string();
+        session.rcpts.insert("rcpt@example.com".to_string());
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_rset(&mut server).await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "250 OK\r\n");
+        assert!(session.from.is_empty());
+        assert!(session.rcpts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_quit() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_quit(&mut server).await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "221 Bye\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_handle_unknown() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let (mut client, mut server) = duplex(1024);
+        session.handle_unknown(&mut server).await.unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "502 Command not implemented\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_dispatch_rset() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+        session.from = "test@example.com".to_string();
+        let (tx, _rx) = mpsc::channel(10);
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, _client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let mut line = String::new();
+
+        session
+            .handle_command(&mut reader, &mut server_write, &tx, &mut line, "RSET", None)
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "250 OK\r\n");
+        assert!(session.from.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_command() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let input = b"MAIL FROM:<sender@example.com>\r\n";
+        let mut reader = BufReader::new(&input[..]);
+        let mut line = String::new();
+
+        let (command, argument) = session.read_command(&mut reader, &mut line).await;
+        assert_eq!(command, "MAIL");
+        assert_eq!(argument.as_deref(), Some("FROM:<sender@example.com>"));
+    }
+
+    #[tokio::test]
+    async fn test_write_response_format() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let (mut client, mut server) = duplex(1024);
+        session.write_response(&mut server, 250, "OK").await;
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert_eq!(output, "250 OK\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_build_transformers_message_id() {
+        let configs = vec![TransformerConfig::MessageId {
+            domain: "example.com".to_string(),
+        }];
+        let transformers = build_transformers(&configs, "localhost").await;
+        assert_eq!(transformers.len(), 1);
+    }
+
+    #[test]
+    fn test_load_credentials_not_found() {
+        let result = load_credentials("/nonexistent/path.txt");
+        assert!(result.is_err());
+    }
 }

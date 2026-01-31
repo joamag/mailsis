@@ -35,11 +35,16 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings -A unknown-lints
       - name: Run unit tests
         run: cargo test
-      - name: Run coverage report
+      - name: Install coverage tools
         run: |
           cargo install cargo-llvm-cov
           rustup component add llvm-tools-preview
-          cargo llvm-cov --all-features --all-targets
+      - name: Coverage report (utils library)
+        run: cargo llvm-cov --all-features --all-targets --package mailsis-utils
+      - name: Coverage report (SMTP)
+        run: cargo llvm-cov --all-features --all-targets --package mailsis-smtp
+      - name: Coverage report (IMAP)
+        run: cargo llvm-cov --all-features --all-targets --package mailsis-imap
       - name: Build development version
         run: cargo build --all-targets
       - name: Build release version
