@@ -32,6 +32,7 @@ pub async fn generate_random_file(path: impl AsRef<Path>, size_mb: usize) -> Res
         AsyncWriteExt::write_all(&mut file, &chunk).await?;
     }
 
+    file.flush().await?;
     Ok(())
 }
 
