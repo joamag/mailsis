@@ -35,6 +35,11 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings -A unknown-lints
       - name: Run unit tests
         run: cargo test
+      - name: Run coverage report
+        run: |
+          cargo install cargo-llvm-cov
+          rustup component add llvm-tools-preview
+          cargo llvm-cov --all-features --all-targets
       - name: Build development version
         run: cargo build --all-targets
       - name: Build release version
