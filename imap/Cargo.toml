@@ -6,6 +6,7 @@ authors = ["João Magalhães <joamag@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/joamag/mailsis"
 keywords = ["email", "imap", "server"]
+readme = "../README.md"
 edition = "2021"
 rust-version = "1.83"
 
