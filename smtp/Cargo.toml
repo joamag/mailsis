@@ -1,7 +1,7 @@
 [package]
 name = "mailsis-smtp"
 description = "Simple (yet efficient) SMTP server."
-version = "0.2.0"
+version = "0.2.1"
 authors = ["João Magalhães <joamag@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/joamag/mailsis"
@@ -24,7 +24,7 @@ base64 = "0.22"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "chrono"] }
-mailsis-utils = { path = "../crates/utils", version = "0.2.0" }
+mailsis-utils = { path = "../crates/utils", version = "0.2.1" }
 
 [dev-dependencies]
 lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls"] }
