@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+*
+
+### Changed
+
+*
+
+### Fixed
+
+*
+
+## [0.2.0] - 2026-01-31
+
+### Added
+
 * Added per-rule `auth_required` override in routing configuration (per-recipient authentication at RCPT TO time)
 * Added `MessageRouter::resolve_auth_required()` for recipient-based auth resolution with global fallback
 * Added `MessageTransformer` trait for pluggable email transformation pipeline
