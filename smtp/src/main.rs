@@ -381,6 +381,9 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         Ok(())
     }
 
+    /// Reads a single SMTP command line from the reader and splits it into
+    /// an upper-cased command verb and its remaining argument, preserving
+    /// any internal whitespace so forms like `AUTH LOGIN <b64>` survive intact.
     async fn read_command<R: AsyncRead + AsyncBufRead + Unpin>(
         &mut self,
         reader: &mut R,
@@ -389,9 +392,12 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
         line.clear();
         reader.read_line(line).await.unwrap_or(0);
 
-        let mut parts = line.split_whitespace();
-        let command = parts.next().unwrap_or("").to_uppercase();
-        let argument = parts.next().map(|arg| arg.to_string());
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        let (command, argument) = match trimmed.split_once(char::is_whitespace) {
+            Some((cmd, rest)) => (cmd.to_uppercase(), Some(rest.trim_start().to_string())),
+            None => (trimmed.to_uppercase(), None),
+        };
+        let argument = argument.filter(|s| !s.is_empty());
 
         (command, argument)
     }
@@ -1185,6 +1191,20 @@ mod tests {
         client_read.read_to_string(&mut output).await.unwrap();
         assert_eq!(output, "250 OK\r\n");
         assert!(session.from.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_command_preserves_argument_whitespace() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let input = b"AUTH LOGIN YWRtaW4=\r\n";
+        let mut reader = BufReader::new(&input[..]);
+        let mut line = String::new();
+
+        let (command, argument) = session.read_command(&mut reader, &mut line).await;
+        assert_eq!(command, "AUTH");
+        assert_eq!(argument.as_deref(), Some("LOGIN YWRtaW4="));
     }
 
     #[tokio::test]
