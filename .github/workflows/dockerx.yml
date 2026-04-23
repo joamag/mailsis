@@ -14,7 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { dockerfile: "Dockerfile", tag_name: "latest", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
+          - { dockerfile: "Dockerfile", tag_suffix: "", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
+          - { dockerfile: "Dockerfile.minimal", tag_suffix: "-minimal", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,11 +35,15 @@ jobs:
         id: set_tag
         run: |
           if [[ "${{ github.ref_name }}" == "master" ]]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            base_tag="latest"
           else
             ref_name=${{ github.ref_name }}
-            BRANCH_NAME=${ref_name//\//_}
-            echo "tag=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            base_tag=${ref_name//\//_}
+          fi
+          if [[ "${{ matrix.config.tag_suffix }}" == "-minimal" && "$base_tag" == "latest" ]]; then
+            echo "tag=minimal" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${base_tag}${{ matrix.config.tag_suffix }}" >> $GITHUB_OUTPUT
           fi
       - name: Configure Buildx
         uses: docker/setup-buildx-action@v3
