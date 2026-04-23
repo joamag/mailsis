@@ -15,7 +15,7 @@ jobs:
       matrix:
         config:
           - { dockerfile: "Dockerfile", tag_suffix: "", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
-          - { dockerfile: "Dockerfile.minimal", tag_suffix: "-minimal", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
+          - { dockerfile: "Dockerfile.minimal", tag_suffix: "-minimal", arch: "linux/amd64,linux/arm64/v8" }
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
