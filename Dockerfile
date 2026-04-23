@@ -1,4 +1,4 @@
-FROM rust:latest as builder
+FROM rust:1-bookworm as builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -31,4 +31,4 @@ COPY --from=builder /app/certs /usr/local/bin/certs
 
 WORKDIR /usr/local/bin
 
-ENTRYPOINT ["/usr/local/bin/mailsis-smtp"]
+CMD ["/usr/local/bin/mailsis-smtp"]

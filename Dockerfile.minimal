@@ -21,4 +21,4 @@ COPY --from=builder /app/certs /usr/local/bin/certs
 
 WORKDIR /usr/local/bin
 
-ENTRYPOINT ["/usr/local/bin/mailsis-smtp"]
+CMD ["/usr/local/bin/mailsis-smtp"]
