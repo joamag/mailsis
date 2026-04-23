@@ -992,6 +992,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_handle_auth_with_username_failure() {
+        let mut map = HashMap::new();
+        map.insert("admin".to_string(), "secret".to_string());
+        let auth_engine = Arc::new(MemoryAuthEngine::from_map(map));
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+
+        let encoded_user = STANDARD.encode("admin");
+        let encoded_pass = STANDARD.encode("wrong");
+        let input = format!("{encoded_pass}\r\n");
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, mut client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let write_task = tokio::spawn(async move {
+            client_write.write_all(input.as_bytes()).await.unwrap();
+            drop(client_write);
+        });
+
+        let mut line = String::new();
+        session
+            .handle_auth_with_username(
+                &mut reader,
+                &mut server_write,
+                &mut line,
+                &format!(" {encoded_user}"),
+            )
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+        write_task.await.unwrap();
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(!session.authenticated);
+        assert!(output.contains("535 Authentication failed"));
+    }
+
+    #[tokio::test]
     async fn test_handle_mail_auth_required() {
         let auth_engine = Arc::new(MemoryAuthEngine::new());
         let mut session = SMTPSession::new(auth_engine, true, test_router(), None);
@@ -1191,6 +1231,50 @@ mod tests {
         client_read.read_to_string(&mut output).await.unwrap();
         assert_eq!(output, "250 OK\r\n");
         assert!(session.from.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_dispatch_auth_initial() {
+        let mut map = HashMap::new();
+        map.insert("admin".to_string(), "secret".to_string());
+        let auth_engine = Arc::new(MemoryAuthEngine::from_map(map));
+        let mut session = SMTPSession::new(auth_engine, false, test_router(), None);
+        let (tx, _rx) = mpsc::channel(10);
+
+        let encoded_user = STANDARD.encode("admin");
+        let encoded_pass = STANDARD.encode("secret");
+        let input = format!("{encoded_pass}\r\n");
+
+        let (client, server) = duplex(1024);
+        let (mut client_read, mut client_write) = tokio::io::split(client);
+        let (server_read, mut server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let write_task = tokio::spawn(async move {
+            client_write.write_all(input.as_bytes()).await.unwrap();
+            drop(client_write);
+        });
+
+        let mut line = String::new();
+        let arg = format!("LOGIN {encoded_user}");
+        session
+            .handle_command(
+                &mut reader,
+                &mut server_write,
+                &tx,
+                &mut line,
+                "AUTH",
+                Some(&arg),
+            )
+            .await
+            .unwrap();
+        drop(server_write);
+        drop(reader);
+        write_task.await.unwrap();
+
+        let mut output = String::new();
+        client_read.read_to_string(&mut output).await.unwrap();
+        assert!(session.authenticated);
+        assert!(output.contains("235 Authentication successful"));
     }
 
     #[tokio::test]
