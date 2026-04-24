@@ -55,7 +55,8 @@ metadata = true                # Store metadata in SQLite
 #   1. Exact address   (address = "user@domain")
 #   2. Domain          (domain  = "domain")
 #   3. Wildcard domain (domain  = "*.domain")
-#   4. Default handler (fallback)
+#   4. Catch-all       (domain  = "*")
+#   5. Default handler (fallback)
 #
 # The first matching rule wins. If no rule matches, the default
 # handler is used.
@@ -108,6 +109,12 @@ default = "local"
 # domain = "*.internal.org"
 # handler = "local"
 # auth_required = false
+
+# Catch-all fallback for every recipient not matched above (requires authentication)
+# [[smtp.routing.rules]]
+# domain = "*"
+# handler = "local"
+# auth_required = true
 
 # To deny every recipient that does not match a rule above, define a
 # "reject" handler (see [smtp.handlers.reject] above) and set it as the

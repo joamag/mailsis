@@ -2,8 +2,8 @@
 //!
 //! When an email arrives, the router decides which delivery handler should
 //! process it by matching the recipient address against a prioritized list
-//! of rules (exact address, domain, wildcard domain). Unmatched recipients
-//! fall through to a configurable default handler.
+//! of rules (exact address, domain, wildcard domain, catch-all). Unmatched
+//! recipients fall through to a configurable default handler.
 
 use std::sync::Arc;
 
@@ -22,6 +22,8 @@ pub enum MatchType {
     Domain,
     /// Matches all subdomains (e.g. "*.example.com").
     WildcardDomain,
+    /// Matches any recipient (e.g. "*").
+    CatchAll,
 }
 
 /// A single routing rule that maps a pattern to a handler.
@@ -57,13 +59,14 @@ impl RoutingRule {
                     false
                 }
             }
+            MatchType::CatchAll => true,
         }
     }
 }
 
 /// Routes incoming email messages to handlers based on recipient address rules.
 ///
-/// Rules are evaluated in specificity order: exact address > domain > wildcard domain.
+/// Rules are evaluated in specificity order: exact address > domain > wildcard domain > catch-all.
 /// If no rule matches, the default handler is used.
 pub struct MessageRouter {
     rules: Vec<RoutingRule>,
@@ -83,17 +86,18 @@ impl MessageRouter {
     /// Creates a new [`MessageRouter`] with the given rules, default handler, and
     /// default transformers.
     ///
-    /// Rules are automatically sorted by specificity (exact > domain > wildcard).
+    /// Rules are automatically sorted by specificity (exact > domain > wildcard > catch-all).
     pub fn new(
         mut rules: Vec<RoutingRule>,
         default_handler: Arc<dyn MessageHandler>,
         default_transformers: Vec<Box<dyn MessageTransformer>>,
     ) -> Self {
-        // Sort by specificity: ExactAddress first, then Domain, then WildcardDomain
+        // Sort by specificity: ExactAddress first, then Domain, then WildcardDomain, then CatchAll
         rules.sort_by_key(|r| match r.match_type {
             MatchType::ExactAddress => 0,
             MatchType::Domain => 1,
             MatchType::WildcardDomain => 2,
+            MatchType::CatchAll => 3,
         });
         Self {
             rules,
@@ -174,13 +178,16 @@ impl MessageRouter {
 /// Determines the match type from a routing rule configuration.
 ///
 /// Returns [`ExactAddress`](MatchType::ExactAddress) if an address field is present,
+/// [`CatchAll`](MatchType::CatchAll) if the domain is exactly `"*"`,
 /// [`WildcardDomain`](MatchType::WildcardDomain) if the domain starts with `*.`,
 /// or [`Domain`](MatchType::Domain) otherwise.
 pub fn determine_match_type(address: &Option<String>, domain: &Option<String>) -> MatchType {
     if address.is_some() {
         MatchType::ExactAddress
     } else if let Some(d) = domain {
-        if d.starts_with("*.") {
+        if d == "*" {
+            MatchType::CatchAll
+        } else if d.starts_with("*.") {
             MatchType::WildcardDomain
         } else {
             MatchType::Domain
@@ -289,6 +296,24 @@ mod tests {
         assert!(!rule.matches("user@other.com"));
     }
 
+    #[test]
+    fn test_catch_all_match() {
+        let handler = Arc::new(CountingHandler::new("test"));
+        let rule = RoutingRule {
+            match_type: MatchType::CatchAll,
+            pattern: "*".to_string(),
+            handler,
+            transformers: vec![],
+            auth_required: None,
+        };
+
+        assert!(rule.matches("user@example.com"));
+        assert!(rule.matches("user@other.com"));
+        assert!(rule.matches("admin@deep.sub.example.com"));
+        assert!(rule.matches("malformed-no-at-sign"));
+        assert!(rule.matches(""));
+    }
+
     #[tokio::test]
     async fn test_router_specificity_order() {
         let exact_handler = Arc::new(CountingHandler::new("exact"));
@@ -329,6 +354,44 @@ mod tests {
         let mut msg = EmailMessage::from_raw("sender@test.com", "user@other.com", "test");
         router.route(&mut msg).await.unwrap();
         assert_eq!(default_handler.count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_router_catch_all_fallback() {
+        let domain_handler = Arc::new(CountingHandler::new("domain"));
+        let catch_all_handler = Arc::new(CountingHandler::new("catch_all"));
+        let default_handler = Arc::new(CountingHandler::new("default"));
+
+        let rules = vec![
+            RoutingRule {
+                match_type: MatchType::CatchAll,
+                pattern: "*".to_string(),
+                handler: catch_all_handler.clone(),
+                transformers: vec![],
+                auth_required: None,
+            },
+            RoutingRule {
+                match_type: MatchType::Domain,
+                pattern: "example.com".to_string(),
+                handler: domain_handler.clone(),
+                transformers: vec![],
+                auth_required: None,
+            },
+        ];
+
+        let router = MessageRouter::new(rules, default_handler.clone(), vec![]);
+
+        // Specific rule wins over catch-all
+        let mut msg = EmailMessage::from_raw("sender@test.com", "user@example.com", "test");
+        router.route(&mut msg).await.unwrap();
+        assert_eq!(domain_handler.count(), 1);
+        assert_eq!(catch_all_handler.count(), 0);
+
+        // Catch-all picks up everything else, default never fires
+        let mut msg = EmailMessage::from_raw("sender@test.com", "user@other.com", "test");
+        router.route(&mut msg).await.unwrap();
+        assert_eq!(catch_all_handler.count(), 1);
+        assert_eq!(default_handler.count(), 0);
     }
 
     #[test]
@@ -376,6 +439,24 @@ mod tests {
     }
 
     #[test]
+    fn test_catch_all_auth_required_override() {
+        let handler = Arc::new(CountingHandler::new("test"));
+        let rules = vec![RoutingRule {
+            match_type: MatchType::CatchAll,
+            pattern: "*".to_string(),
+            handler: handler.clone(),
+            transformers: vec![],
+            auth_required: Some(true),
+        }];
+
+        let router = MessageRouter::new(rules, handler, vec![]);
+
+        // Catch-all rule forces auth even when global default is false
+        assert!(router.resolve_auth_required("user@whatever.com", false));
+        assert!(router.resolve_auth_required("someone@else.net", false));
+    }
+
+    #[test]
     fn test_determine_match_type() {
         assert_eq!(
             determine_match_type(&Some("user@test.com".to_string()), &None),
@@ -388,6 +469,10 @@ mod tests {
         assert_eq!(
             determine_match_type(&None, &Some("*.example.com".to_string())),
             MatchType::WildcardDomain
+        );
+        assert_eq!(
+            determine_match_type(&None, &Some("*".to_string())),
+            MatchType::CatchAll
         );
     }
 
