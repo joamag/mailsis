@@ -7,51 +7,35 @@ on:
       - none
   workflow_dispatch:
 jobs:
-  build:
-    name: Build
-    timeout-minutes: 180
+  fast:
+    name: Fast (${{ matrix.config.dockerfile }})
     strategy:
       fail-fast: false
       matrix:
         config:
-          - { dockerfile: "Dockerfile", tag_suffix: "", arch: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
-          - { dockerfile: "Dockerfile.minimal", tag_suffix: "-minimal", arch: "linux/amd64,linux/arm64/v8" }
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          submodules: true
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Set tag name based on branch
-        id: set_tag
-        run: |
-          if [[ "${{ github.ref_name }}" == "master" ]]; then
-            base_tag="latest"
-          else
-            ref_name=${{ github.ref_name }}
-            base_tag=${ref_name//\//_}
-          fi
-          if [[ "${{ matrix.config.tag_suffix }}" == "-minimal" && "$base_tag" == "latest" ]]; then
-            echo "tag=minimal" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${base_tag}${{ matrix.config.tag_suffix }}" >> $GITHUB_OUTPUT
-          fi
-      - name: Configure Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ${{ matrix.config.dockerfile }}
-          platforms: ${{ matrix.config.arch }}
-          push: true
-          tags: joamag/mailsis:${{ steps.set_tag.outputs.tag }}
+          - { dockerfile: "Dockerfile", tag_suffix: "-amd64" }
+          - { dockerfile: "Dockerfile.minimal", tag_suffix: "-minimal-amd64" }
+    uses: ./.github/workflows/dockerx-build.yml
+    with:
+      dockerfile: ${{ matrix.config.dockerfile }}
+      platforms: "linux/amd64"
+      tag_suffix: ${{ matrix.config.tag_suffix }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  full:
+    name: Full (${{ matrix.config.dockerfile }})
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { dockerfile: "Dockerfile", tag_suffix: "", platforms: "linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8" }
+          - { dockerfile: "Dockerfile.minimal", tag_suffix: "-minimal", platforms: "linux/amd64,linux/arm64/v8" }
+    uses: ./.github/workflows/dockerx-build.yml
+    with:
+      dockerfile: ${{ matrix.config.dockerfile }}
+      platforms: ${{ matrix.config.platforms }}
+      tag_suffix: ${{ matrix.config.tag_suffix }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
