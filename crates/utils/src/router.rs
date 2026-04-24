@@ -159,6 +159,16 @@ impl MessageRouter {
     pub fn default_handler(&self) -> &Arc<dyn MessageHandler> {
         &self.default_handler
     }
+
+    /// Probes the handler that would process `recipient` and, if that handler
+    /// refuses every delivery, returns the SMTP reply `(code, message)` it
+    /// would emit.
+    ///
+    /// Used by SMTP front-ends to short-circuit at `RCPT TO` time so the
+    /// client receives a proper rejection instead of a post-`DATA` bounce.
+    pub fn rejection_for(&self, recipient: &str) -> Option<(u16, String)> {
+        self.resolve(recipient).reject_reply()
+    }
 }
 
 /// Determines the match type from a routing rule configuration.

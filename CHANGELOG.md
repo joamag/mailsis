@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * Added unit tests for SMTP authentication failure with username and AUTH LOGIN initial-response dispatch
+* Added `RejectHandler`, a void `MessageHandler` that refuses delivery with a configurable SMTP reply
+* Added `reject` variant to `HandlerConfig` for TOML-based configuration of reject handlers (with `code` and `message` fields)
+* Added `HandlerError::Rejected` variant to carry rejection messages through the handler pipeline
+* Added `MessageHandler::reject_reply` hook and `MessageRouter::rejection_for` for SMTP-time rejection probing
+* Added `RCPT TO`-time reject check so clients receive rejections before `DATA`
+* Documented `reject` handler usage in `config.example.toml` and `config.toml`
 
 ### Changed
 

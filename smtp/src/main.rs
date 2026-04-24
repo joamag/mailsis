@@ -7,8 +7,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mailsis_utils::{
     determine_match_type, extract_pattern, get_crate_root, load_config, load_tls_server_config,
     AuthEngine, FileStorageHandler, HandlerConfig, IncomingMessage, MemoryAuthEngine,
-    MessageHandler, MessageIdTransformer, MessageRouter, MessageTransformer, RoutingRule,
-    TransformerConfig,
+    MessageHandler, MessageIdTransformer, MessageRouter, MessageTransformer, RejectHandler,
+    RoutingRule, TransformerConfig,
 };
 use tokio::{
     io::{
@@ -263,6 +263,14 @@ impl<A: AuthEngine + Default> SMTPSession<A> {
                 return Ok(());
             }
 
+            // Short-circuit recipients that route to a reject handler,
+            // so the client sees a proper rejection at RCPT TO time
+            if let Some((code, message)) = self.router.rejection_for(&rcpt) {
+                warn!(rcpt = %rcpt, code = code, "RCPT TO rejected by router");
+                self.write_response(writer, code, &message).await;
+                return Ok(());
+            }
+
             info!(rcpt = %rcpt, "RCPT TO accepted");
             self.rcpts.insert(rcpt);
             self.write_response(writer, 250, "OK").await;
@@ -470,6 +478,9 @@ async fn build_router(
                 return Err(
                     format!("Handler '{name}' requires the 'redis' feature to be enabled").into(),
                 );
+            }
+            HandlerConfig::Reject { code, message } => {
+                Arc::new(RejectHandler::new(*code, message.clone())) as Arc<dyn MessageHandler>
             }
         };
         info!(name = %name, "Registered handler");
@@ -1074,6 +1085,29 @@ mod tests {
         let mut output = String::new();
         client.read_to_string(&mut output).await.unwrap();
         assert!(output.contains("501 Syntax error"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_rcpt_rejected_by_router() {
+        let auth_engine = Arc::new(MemoryAuthEngine::new());
+        let router = Arc::new(MessageRouter::new(
+            vec![],
+            Arc::new(RejectHandler::new(550, "Relay access denied".to_string())),
+            vec![],
+        ));
+        let mut session = SMTPSession::new(auth_engine, false, router, None);
+
+        let (mut client, mut server) = duplex(1024);
+        session
+            .handle_rcpt(&mut server, "TO:<rcpt@example.com>")
+            .await
+            .unwrap();
+        drop(server);
+
+        let mut output = String::new();
+        client.read_to_string(&mut output).await.unwrap();
+        assert!(output.contains("550 Relay access denied"));
+        assert!(session.rcpts.is_empty());
     }
 
     #[tokio::test]

@@ -98,6 +98,18 @@ pub enum HandlerConfig {
         #[serde(default = "default_redis_queue")]
         queue: String,
     },
+
+    /// Void handler that always refuses delivery with a fixed SMTP reply.
+    ///
+    /// Intended as a default routing target to deny everything that does not
+    /// match an explicit routing rule.
+    #[serde(rename = "reject")]
+    Reject {
+        #[serde(default = "default_reject_code")]
+        code: u16,
+        #[serde(default = "default_reject_message")]
+        message: String,
+    },
 }
 
 /// Routing configuration with rules and a default handler.
@@ -237,6 +249,14 @@ fn default_redis_queue() -> String {
 
 fn default_handler_name() -> String {
     "local".to_string()
+}
+
+fn default_reject_code() -> u16 {
+    550
+}
+
+fn default_reject_message() -> String {
+    "Relay access denied".to_string()
 }
 
 #[cfg(test)]
@@ -465,6 +485,44 @@ handler = "local"
 
         let result = load_config(&config_path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_reject_handler_defaults() {
+        let toml = r#"
+[smtp]
+
+[smtp.handlers.block]
+type = "reject"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        match &config.smtp.handlers["block"] {
+            HandlerConfig::Reject { code, message } => {
+                assert_eq!(*code, 550);
+                assert_eq!(message, "Relay access denied");
+            }
+            other => panic!("Expected Reject handler, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reject_handler_custom() {
+        let toml = r#"
+[smtp]
+
+[smtp.handlers.deny]
+type = "reject"
+code = 521
+message = "No mail accepted here"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        match &config.smtp.handlers["deny"] {
+            HandlerConfig::Reject { code, message } => {
+                assert_eq!(*code, 521);
+                assert_eq!(message, "No mail accepted here");
+            }
+            other => panic!("Expected Reject handler, got {other:?}"),
+        }
     }
 
     #[test]

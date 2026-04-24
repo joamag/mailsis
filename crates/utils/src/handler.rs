@@ -21,6 +21,8 @@ pub enum HandlerError {
     Connection(String),
     /// A serialization error occurred.
     Serialization(String),
+    /// The recipient was refused by a reject handler.
+    Rejected(String),
 }
 
 impl Display for HandlerError {
@@ -29,6 +31,7 @@ impl Display for HandlerError {
             HandlerError::Storage(msg) => write!(f, "Storage error: {msg}"),
             HandlerError::Connection(msg) => write!(f, "Connection error: {msg}"),
             HandlerError::Serialization(msg) => write!(f, "Serialization error: {msg}"),
+            HandlerError::Rejected(msg) => write!(f, "Rejected: {msg}"),
         }
     }
 }
@@ -46,6 +49,12 @@ pub trait MessageHandler: Send + Sync {
 
     /// Returns the name of this handler.
     fn name(&self) -> &str;
+
+    /// Returns the SMTP reply `(code, message)` for handlers that refuse
+    /// every delivery, or [`None`] for handlers that accept messages.
+    fn reject_reply(&self) -> Option<(u16, String)> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -65,6 +74,10 @@ mod tests {
         assert_eq!(
             HandlerError::Serialization("test".to_string()).to_string(),
             "Serialization error: test"
+        );
+        assert_eq!(
+            HandlerError::Rejected("Relay access denied".to_string()).to_string(),
+            "Rejected: Relay access denied"
         );
     }
 }

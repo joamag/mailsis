@@ -39,6 +39,14 @@ metadata = true                # Store metadata in SQLite
 # url = "redis://127.0.0.1:6379"
 # queue = "incoming_emails"
 
+# Void handler that refuses delivery with a configurable SMTP reply.
+# Use as the routing default (see below) to deny every recipient that
+# does not match an explicit rule.
+# [smtp.handlers.reject]
+# type = "reject"
+# code = 550                      # Defaults to 550
+# message = "Relay access denied" # Defaults to "Relay access denied"
+
 # -- Routing --------------------------------------------------------
 #
 # Routes incoming emails to handlers based on the recipient address.
@@ -100,3 +108,8 @@ default = "local"
 # domain = "*.internal.org"
 # handler = "local"
 # auth_required = false
+
+# To deny every recipient that does not match a rule above, define a
+# "reject" handler (see [smtp.handlers.reject] above) and set it as the
+# routing default: change the "default" field in [smtp.routing] to
+# "reject". Clients receive the rejection at RCPT TO time.
