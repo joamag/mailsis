@@ -155,11 +155,6 @@ impl MessageRouter {
         global_default
     }
 
-    /// Returns a reference to the default handler.
-    pub fn default_handler(&self) -> &Arc<dyn MessageHandler> {
-        &self.default_handler
-    }
-
     /// Probes the handler that would process `recipient` and, if that handler
     /// refuses every delivery, returns the SMTP reply `(code, message)` it
     /// would emit.
@@ -168,6 +163,11 @@ impl MessageRouter {
     /// client receives a proper rejection instead of a post-`DATA` bounce.
     pub fn rejection_for(&self, recipient: &str) -> Option<(u16, String)> {
         self.resolve(recipient).reject_reply()
+    }
+
+    /// Returns a reference to the default handler.
+    pub fn default_handler(&self) -> &Arc<dyn MessageHandler> {
+        &self.default_handler
     }
 }
 
