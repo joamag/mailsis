@@ -13,12 +13,16 @@ EXPOSE 2525 1430
 ENV HOST=0.0.0.0
 ENV PORT=2525
 
-RUN apk add --no-cache libc6-compat ca-certificates
+RUN apk add --no-cache libc6-compat ca-certificates \
+    && addgroup -S -g 10001 mailsis \
+    && adduser -S -u 10001 -G mailsis -s /sbin/nologin mailsis
 
 COPY --from=builder /app/target/release/mailsis-imap /usr/local/bin/mailsis-imap
 COPY --from=builder /app/target/release/mailsis-smtp /usr/local/bin/mailsis-smtp
 COPY --from=builder /app/certs /usr/local/bin/certs
 
 WORKDIR /usr/local/bin
+
+USER mailsis
 
 CMD ["/usr/local/bin/mailsis-smtp"]

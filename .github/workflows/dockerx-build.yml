@@ -66,3 +66,5 @@ jobs:
           platforms: ${{ inputs.platforms }}
           push: true
           tags: joamag/mailsis:${{ steps.set_tag.outputs.tag }}
+          provenance: mode=max
+          sbom: true

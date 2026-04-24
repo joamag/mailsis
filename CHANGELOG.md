@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-*
+* Split the docker build workflow into a fast-track amd64 job and the existing multi-arch job, both calling a reusable `dockerx-build.yml` workflow (native amd64 images no longer wait on QEMU-emulated arches)
+* Published `latest-amd64` and `minimal-amd64` tags from the fast-track job; legacy `latest` and `minimal` multi-arch tags are preserved
+* Enabled SLSA provenance (`mode=max`) and SPDX SBOM attestations on every pushed image
+* Both Docker images now run as a non-root `mailsis` user (uid/gid 10001) with a `USER` directive, instead of running as root
 
 ### Fixed
 

@@ -23,12 +23,16 @@ ENV PORT=2525
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 mailsis \
+    && useradd --system --uid 10001 --gid mailsis --home-dir /nonexistent --shell /usr/sbin/nologin mailsis
 
 COPY --from=builder /app/target/release/mailsis-imap /usr/local/bin/mailsis-imap
 COPY --from=builder /app/target/release/mailsis-smtp /usr/local/bin/mailsis-smtp
 COPY --from=builder /app/certs /usr/local/bin/certs
 
 WORKDIR /usr/local/bin
+
+USER mailsis
 
 CMD ["/usr/local/bin/mailsis-smtp"]
