@@ -39,3 +39,16 @@ jobs:
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  trigger-deploy:
+    name: Trigger mailsis deployment
+    needs: fast
+    if: github.event_name == 'push' && github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hivesolutions/deploy-action@v1
+        with:
+          repository: hivesolutions/infra-bemisc
+          service: mailsis
+          group: mail
+          tag: minimal-amd64
+          token: ${{ secrets.INFRA_DEPLOY_PAT }}
